@@ -1,0 +1,20 @@
+{
+  "name": "@devmentor/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DevMentor domain: models, services and ports. Framework-, ORM- and DI-free.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@devmentor/shared": "*"
+  },
+  "devDependencies": {
+    "@devmentor/config": "*"
+  }
+}

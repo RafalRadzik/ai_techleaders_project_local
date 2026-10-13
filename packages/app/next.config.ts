@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
+// Env vars come from the monorepo root `.env`, loaded by `with-root-env` in the package scripts.
 const nextConfig: NextConfig = {
-  /* config options here */
   experimental: {
     agentFeedback: true,
   },

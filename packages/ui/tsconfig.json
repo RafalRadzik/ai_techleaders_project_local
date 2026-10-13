@@ -1,0 +1,9 @@
+{
+  "extends": "@devmentor/config/tsconfig/react-library.json",
+  "compilerOptions": {
+    "paths": {
+      "@devmentor/ui/*": ["./src/*"]
+    }
+  },
+  "include": ["src", "*.mjs"]
+}

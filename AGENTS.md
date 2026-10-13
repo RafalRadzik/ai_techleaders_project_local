@@ -17,6 +17,7 @@ DevMentor is a Next.js application organised as an **npm-workspaces monorepo**.
 | Dependency injection | Awilix 13 (`InjectionMode.PROXY`, `strict: true`) |
 | Public (frontend) pages | Tailwind CSS 4 utility classes |
 | Admin (backend) pages | shadcn-ui (`base-nova` style, Base UI primitives) from `@devmentor/ui`, on Tailwind 4 |
+| Validation | Zod 4: one schema per input in `@devmentor/core/validators`, used by route handlers and forms |
 | Lint | ESLint 9 flat config, shared presets in `@devmentor/config` |
 | Package manager | npm workspaces. One root `package-lock.json`. Don't add yarn, pnpm, bun or Turborepo. |
 
@@ -82,15 +83,59 @@ shared  <-  ui  <-----------  app
 - New package: create `packages/<name>` with `"name": "@devmentor/<name>"` and the same scripts and presets. Add its boundary rule to `boundaries.mjs`, then document it here and in `README.md`. Adding a package needs a spec.
 - Declare every dependency in the `package.json` of the package that imports it (not only at the root). Shared tooling (`eslint`, `typescript`, `@types/node`) lives in the root `devDependencies`.
 
+### Domain concept convention
+
+Domain code is not organised into `modules/`. Each concept (`users`, later `auth`, `mentors`, `availability`, `bookings`, `payments`, `messages`, `favorites`, `reviews`, ...) is a same-named sub-folder repeated across the layers that need it:
+
+| Layer | Path | Example |
+| --- | --- | --- |
+| Domain type + service | `packages/core/src/services/<concept>/<name>.service.ts` (type in `<name>.ts`) | `services/users/user.service.ts` → `UserService` |
+| Port (interface) | `packages/core/src/services/<concept>/<name>.port.ts` | `user-repository.port.ts` → `UserRepository` |
+| Shared Zod schema | `packages/core/src/validators/<concept>/<name>-<action>.schema.ts`, re-exported from `validators/index.ts` | `userCreateSchema` |
+| Entity | `packages/db/src/entities/<concept>/<name>.entity.ts`, registered in `entities/index.ts` | `entities/users/user.entity.ts` |
+| Repository (port adapter) | `packages/db/src/repositories/<concept>/<name>.repository.ts`; maps entities to plain domain objects | `MikroOrmUserRepository` |
+| HTTP | `packages/app/app/api/<concept>/route.ts`, item routes in `api/<concept>/[id]/route.ts` | `api/users/route.ts` |
+| Concept UI component | `packages/ui/src/components/<concept>/` | — |
+
+- Create a concept folder only when its first file is added. Never scaffold empty ones, and never add a per-concept setup/ACL file or auto-discovery.
+- Every new service or repository is one explicit line in `container.ts` (and its `Cradle` entry). No `loadModules`.
+- Domain errors are the `@devmentor/shared` classes (`NotFoundError`, `ForbiddenError`, `UnauthorizedError`, `ValidationError`, `ConflictError`, base `AppError`). Services throw them and never build HTTP responses.
+- Domain events (`concept.entity.action`, e.g. `bookings.booking.created`) will use a typed in-process emitter in `packages/core/src/events`, added with the first feature that emits one. There is no queue.
+- External integrations (payments, notifications) are ports in `core` with a mock adapter first. Vendor SDKs never reach `core`.
+- Full naming table, principles and security requirements: `.ai/specs/implemented/2026-09-01-engineering-standards.md` (its "Reconciliation" table overrides the older sections).
+
+### Reusable API & UI layer
+
+Every route and page reuses these instead of re-implementing fetch, validation or error handling:
+
+- `packages/app/server/http/` (server-only):
+  - `apiHandler.ts` wraps a route handler. It calls `connection()`, rejects state-changing requests without the `x-devmentor-client` header (CSRF), returns `{ ok: true, data }`, maps `AppError`s to `{ ok: false, error: { code, message, fieldErrors? } }` with the right status, and logs unexpected errors (generic `500`, nothing leaked).
+  - `makeCrudRoute.ts` turns a service name + shared schemas into `{ GET, POST, PUT, DELETE }` for plain CRUD: `export const { GET, POST } = makeCrudRoute({ service: "userService", list, create })`. Use `apiHandler` directly for workflows (booking, payment).
+  - `parseBody.ts` parses JSON through a schema. Services only ever get the parsed output (no mass assignment).
+  - Route handlers never write their own `try/catch` + `Response.json`. Exception: `/api/health`, a monitoring probe whose contract is the status code.
+- `packages/ui/src/backend/` (admin):
+  - `api/apiCall.ts`: `apiCall` / `apiCallOrThrow`, the only `fetch()` call site for `/api/*`.
+  - `forms/CrudForm.tsx`: schema-driven form (same schema as the route), server `fieldErrors`, Cmd/Ctrl+Enter submit, Escape cancel.
+  - `tables/DataTable.tsx`: column config, loading/empty/error states, pagination, row actions.
+  - `feedback/{LoadingMessage,ErrorMessage,EmptyState}.tsx`: the only loading/error/empty renderers.
+- The envelope types (`ApiResult`) and the client header constant live in `@devmentor/shared`, so `app` and `ui` share them.
+- Logging: resolve `logger` from the container (`createConsoleLogger` from `@devmentor/shared`, which redacts passwords, tokens, cookies and secrets). No `console.*` in server code.
+- Where a new reusable component goes:
+  1. shadcn primitive → `ui/src/components/ui/`, only via the shadcn CLI.
+  2. Generic panel pattern → `ui/src/backend/<category>/`.
+  3. Tied to one concept's domain shape → `ui/src/components/<concept>/`.
+  4. Used by one page → colocate it next to that `page.tsx` until a second page needs it (e.g. `admin/users/users-panel.tsx`).
+- Reference implementation to copy: `api/users/route.ts` + `(admin)/admin/users/`.
+
 ### Dependency injection (Awilix)
 
 - The composition root is `packages/app/server/container.ts`. It is `server-only` and is the only place that registers dependencies. Add each registration to the `Cradle` interface first.
 - Services are plain classes or factories that take **one dependencies object**: `constructor({ userRepository }: Deps)` (PROXY injection mode). Never import the container from services, and never use the service-locator pattern outside `app`.
 - Lifetimes:
-  - `singleton`: process-wide resources, e.g. `orm`, which owns the connection pool.
+  - `singleton`: process-wide resources, e.g. `orm`, which owns the connection pool, and the stateless `logger`.
   - `scoped`: everything that touches the `EntityManager`, plus services.
   - Strict mode rejects a singleton that depends on something scoped.
-- Use `getRequestContainer()` to get the request scope. In Server Components it is memoised per request with React `cache`. In Route Handlers and Server Actions, call it once and reuse the result.
+- Use `getRequestContainer()` to get the request scope. In Server Components it is memoised per request with React `cache`. In Route Handlers and Server Actions, call it once and reuse the result (`apiHandler` does this and passes `container` to your handler).
 
 ### Database (MikroORM + PostgreSQL)
 
@@ -115,7 +160,8 @@ shared  <-  ui  <-----------  app
   - `(frontend)/` holds the public pages. They use Tailwind utility classes and `(frontend)/globals.css` only. Don't import `@devmentor/ui` here.
   - `(admin)/admin/` holds the backend pages under `/admin`. They use shadcn-ui components from `@devmentor/ui` and `(admin)/admin.css`, which imports the shadcn theme.
   - Navigating between the two areas is a full page load (separate root layouts). That is intended.
-- shadcn components live in `packages/ui/src/components` and are added with the shadcn CLI from `packages/app` (both packages have a `components.json`). Customise them in place. Theme tokens are in `packages/ui/src/styles/globals.css`.
+- shadcn primitives live in `packages/ui/src/components/ui` (import `@devmentor/ui/components/ui/<name>`) and are added with the shadcn CLI from `packages/app` (both packages have a `components.json`). Customise them in place. Theme tokens are in `packages/ui/src/styles/globals.css`.
+- Panel building blocks are imported as `@devmentor/ui/backend/<category>/<File>` (e.g. `@devmentor/ui/backend/forms/CrudForm`).
 - Tailwind 4 is configured in CSS (`@import "tailwindcss"`, `@theme`, `@source`). There is no `tailwind.config.*`.
 
 ### Environment variables
@@ -168,6 +214,7 @@ Every file in `specs/`, `runs/` and `lessons/` is named `YYYY-MM-DD-slug.md`:
 - **Lifecycle:** `Draft` → `Approved` → `In progress` → `Implemented` (moved to `implemented/`), or `Archived` (moved to `archive/`). Keep the `Status` field current.
 - If the user is available, get the draft approved before implementing it. In unattended runs, go ahead, but write your assumptions into the spec and the run log.
 - The spec is the source of truth. If the implementation has to differ from it, update the spec first and note what changed and why.
+- Before implementing a spec you didn't write in this session, check every path, package direction, API and dependency it names against this file and the code. Record conflicts and the decisions in the spec (a "Reconciliation" table) before writing code. See lesson `2026-10-13-reconcile-pre-drafted-specs`.
 - Move specs with `git mv` (plain `mv` if the file is untracked). Never delete a spec.
 
 Spec template:
@@ -290,6 +337,7 @@ Adapted from [Boris Cherny's Claude Code tips](https://ykdojo.github.io/claude-c
 - Hand-edit the `<!-- BEGIN:nextjs-... -->` managed blocks in `packages/app/AGENTS.md`. `next dev` maintains them.
 - Bypass the package boundaries, e.g. with relative imports into another package's `src/`, or by importing `awilix` outside `app`.
 - Use the global `orm.em` in request code, or change the database schema without a migration.
+- Call `fetch()` for `/api/*` outside `apiCall`, write a hand-rolled `try/catch` + `Response.json` in an API route, or pass a raw request body to a service or `em.create()`/`em.assign()`.
 - Commit `.env`. Only `.env.example`, with placeholder values, is committed.
 
 ## Git

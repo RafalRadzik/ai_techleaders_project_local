@@ -1,4 +1,4 @@
-import type { HealthCheckResult, HealthIndicator, HealthReport } from "./health-indicator";
+import type { HealthCheckResult, HealthIndicator, HealthReport } from "./health-indicator.port";
 
 interface HealthServiceDeps {
   healthIndicators: HealthIndicator[];

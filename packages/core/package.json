@@ -5,14 +5,16 @@
   "type": "module",
   "description": "DevMentor domain: models, services and ports. Framework-, ORM- and DI-free.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./validators": "./src/validators/index.ts"
   },
   "scripts": {
     "lint": "eslint",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@devmentor/shared": "*"
+    "@devmentor/shared": "*",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@devmentor/config": "*"

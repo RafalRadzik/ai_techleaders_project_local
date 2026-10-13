@@ -19,9 +19,10 @@ app/
   (frontend)/          root layout + public pages (Tailwind only, globals.css)
   (admin)/             root layout for the backend area (admin.css = shadcn theme from @devmentor/ui)
     admin/             pages under /admin (shadcn-ui components)
-  api/                 route handlers (e.g. GET /api/health)
+  api/                 route handlers: api/<concept>/route.ts (e.g. /api/users), plus the /api/health probe
 server/
   container.ts         Awilix composition root (server-only): Cradle, registrations, getRequestContainer()
+  http/                apiHandler, makeCrudRoute, parseBody: the only way API routes are written
 public/                static assets served from /
 components.json        shadcn CLI config (installs components into packages/ui)
 next.config.ts         cacheComponents, partialPrefetching, agentFeedback, Tailwind turbopack loader
@@ -40,7 +41,8 @@ next.config.ts         cacheComponents, partialPrefetching, agentFeedback, Tailw
 - Middleware is now called **proxy** (`proxy.ts`). The old `middleware` file name is deprecated.
 - Data access goes through the DI container (`getRequestContainer().resolve(...)`). Never import MikroORM or call `getOrm()` from pages, route handlers or actions.
 - Use `next/image`, `next/link` and `next/font` instead of raw `<img>`, internal `<a>` links or font `<link>` tags. Use the `@/` alias for imports from this package's root.
-- Public route handlers must not leak internal error messages. See `app/api/health/route.ts`.
+- API route handlers are built with `makeCrudRoute` (plain CRUD) or `apiHandler` (workflows) from `@/server/http/*`. They never leak internal error messages; `apiHandler` turns unexpected errors into a generic `500`. Copy `app/api/users/route.ts`.
+- Admin screens that fetch on the client use `apiCall`, `CrudForm`, `DataTable` and the feedback components from `@devmentor/ui/backend/*`. Copy `app/(admin)/admin/users/`.
 
 <!-- BEGIN:nextjs-agent-feedback -->
 

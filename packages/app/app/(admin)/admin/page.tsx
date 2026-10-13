@@ -1,5 +1,6 @@
-import { Badge } from "@devmentor/ui/components/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@devmentor/ui/components/card";
+import { Badge } from "@devmentor/ui/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@devmentor/ui/components/ui/card";
+import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { getRequestContainer } from "@/server/container";
@@ -56,8 +57,11 @@ async function SystemStatus() {
           <CardTitle>Users</CardTitle>
           <CardDescription>Registered accounts</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex items-end justify-between gap-4">
           <p className="text-3xl font-semibold tabular-nums">{userCount ?? "—"}</p>
+          <Link href="/admin/users" className="text-sm font-medium underline-offset-4 hover:underline">
+            Manage users
+          </Link>
         </CardContent>
       </Card>
     </div>

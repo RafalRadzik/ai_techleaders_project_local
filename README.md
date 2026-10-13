@@ -15,7 +15,8 @@ npm run dev               # http://localhost:3000
 ```
 
 - Public site: <http://localhost:3000>
-- Admin: <http://localhost:3000/admin>
+- Admin: <http://localhost:3000/admin> (users: <http://localhost:3000/admin/users>)
+- Users API: `GET` / `POST` <http://localhost:3000/api/users> (unauthenticated until auth is added; local development only)
 - Health check: <http://localhost:3000/api/health> (returns `200` when up, `503` when down)
 
 ## Scripts (run from the repo root)
@@ -37,10 +38,10 @@ npm run dev               # http://localhost:3000
 ```
 packages/
 ├── app/     @devmentor/app     Next.js app: routes, pages, route handlers; DI composition root
-├── core/    @devmentor/core    Domain models, services and ports (interfaces). No framework/ORM/DI.
+├── core/    @devmentor/core    Domain models, services, ports (interfaces) and Zod validators. No framework/ORM/DI.
 ├── db/      @devmentor/db      MikroORM: config, entities, repositories (port adapters), migrations
-├── ui/      @devmentor/ui      shadcn-ui components + theme for the admin pages
-├── shared/  @devmentor/shared  Framework-free utilities and types (env helpers, errors)
+├── ui/      @devmentor/ui      shadcn-ui components, theme and panel building blocks (apiCall, CrudForm, DataTable) for the admin pages
+├── shared/  @devmentor/shared  Framework-free utilities and types (env helpers, error classes, API envelope, logger)
 └── config/  @devmentor/config  tsconfig + ESLint presets, `with-root-env` script
 ```
 
@@ -60,10 +61,33 @@ Dependency direction. Arrows point to what a package may import. It is enforced 
 - **`ui` is presentational.** It holds shadcn-ui components without any data access.
 - Workspace packages are consumed as **TypeScript source** (their `exports` point at `src`). Turbopack transpiles them, so there is no per-package build.
 
+### Domain concepts
+
+Each domain concept (`users` today; `auth`, `mentors`, `bookings`, ... later) is a same-named folder in every layer that needs it:
+
+```
+packages/core/src/services/users/       user.ts, user.service.ts, user-repository.port.ts
+packages/core/src/validators/users/     user-create.schema.ts   (Zod; shared by route + form)
+packages/db/src/entities/users/         user.entity.ts
+packages/db/src/repositories/users/     user.repository.ts
+packages/app/app/api/users/route.ts     makeCrudRoute(...)
+packages/app/app/(admin)/admin/users/   page.tsx + users-panel.tsx (apiCall, CrudForm, DataTable)
+```
+
+Folders are created with a concept's first file, never in advance. The full standards (naming, principles, security, review checklist) are in [`.ai/specs/implemented/2026-09-01-engineering-standards.md`](.ai/specs/implemented/2026-09-01-engineering-standards.md).
+
+### API conventions
+
+- Route handlers are built with `makeCrudRoute` (plain CRUD) or `apiHandler` (workflows) from `packages/app/server/http/`. No route writes its own `try/catch`.
+- Responses use one envelope: `{ ok: true, data }` or `{ ok: false, error: { code, message, fieldErrors? } }`. Services throw the error classes from `@devmentor/shared`, which map to statuses: `ValidationError` 400, `UnauthorizedError` 401, `ForbiddenError` 403, `NotFoundError` 404, `ConflictError` 409, other `AppError` 422, anything else 500 (logged, never leaked).
+- State-changing requests must carry `x-devmentor-client: 1` (CSRF guard). `apiCall` in `@devmentor/ui/backend/api/apiCall` sets it and is the only place the client calls `fetch()` for `/api/*`.
+- `/api/health` is the exception: a monitoring probe that keeps its plain JSON body and `200`/`503` status.
+
 ### Request flow
 
 ```
 Request ─► Next.js page / route handler (packages/app)
+             │  apiHandler / makeCrudRoute     ← envelope, error mapping, CSRF header (route handlers)
              │  getRequestContainer()          ← Awilix scope per request (React cache)
              ▼
            HealthService / UserService         ← @devmentor/core (plain classes, constructor injection)
@@ -78,7 +102,7 @@ Request ─► Next.js page / route handler (packages/app)
 ### Dependency injection (Awilix)
 
 - **Composition root:** `packages/app/server/container.ts`, `server-only`, `InjectionMode.PROXY`, `strict: true`.
-- **Singletons:** `orm`, the MikroORM instance that owns the connection pool.
+- **Singletons:** `orm`, the MikroORM instance that owns the connection pool, and `logger`.
 - **Scoped (per request):**
   - `em`, a forked EntityManager, so identity maps never leak between requests.
   - Repositories and services.
@@ -101,7 +125,7 @@ The Next.js app has two **root layouts** (route groups), each with its own style
 | Public site | `app/(frontend)` | `/` … | Tailwind CSS 4 utilities (`(frontend)/globals.css`) |
 | Admin / backend | `app/(admin)/admin` | `/admin` … | shadcn-ui components from `@devmentor/ui` (`(admin)/admin.css`) |
 
-To add a shadcn component, run `cd packages/app && npx shadcn@latest add <component>`. The CLI installs it into `packages/ui/src/components`. Import it as `@devmentor/ui/components/<component>`.
+To add a shadcn component, run `cd packages/app && npx shadcn@latest add <component>`. The CLI installs it into `packages/ui/src/components/ui`. Import it as `@devmentor/ui/components/ui/<component>`. Panel building blocks live in `packages/ui/src/backend` (`@devmentor/ui/backend/<category>/<File>`).
 
 Next.js is configured with Cache Components and Partial Prefetching. Live data, such as the admin system status, is rendered inside `<Suspense>` after `await connection()`.
 

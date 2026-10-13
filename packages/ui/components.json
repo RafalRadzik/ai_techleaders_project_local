@@ -15,7 +15,7 @@
     "utils": "@devmentor/ui/lib/utils",
     "hooks": "@devmentor/ui/hooks",
     "lib": "@devmentor/ui/lib",
-    "ui": "@devmentor/ui/components"
+    "ui": "@devmentor/ui/components/ui"
   },
   "rtl": false,
   "menuColor": "default",

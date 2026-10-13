@@ -8,11 +8,13 @@ import {
   type EntityManager,
   type MikroORM,
 } from "@devmentor/db";
+import { createConsoleLogger, type Logger } from "@devmentor/shared";
 import { asClass, asFunction, createContainer, InjectionMode, type AwilixContainer } from "awilix";
 import { cache } from "react";
 
 /** Everything resolvable from the container. Add new registrations here first. */
 export interface Cradle {
+  logger: Logger;
   orm: MikroORM;
   em: EntityManager;
   userRepository: UserRepository;
@@ -31,7 +33,8 @@ function createRootContainer(): AppContainer {
   });
 
   container.register({
-    // Singletons: process-wide, own long-lived resources (the connection pool).
+    // Singletons: process-wide, stateless or owning long-lived resources (the connection pool).
+    logger: asFunction(() => createConsoleLogger()).singleton(),
     orm: asFunction(getOrm).singleton(),
 
     // Scoped: one instance per request scope. `em` is forked so identity maps never leak between requests.

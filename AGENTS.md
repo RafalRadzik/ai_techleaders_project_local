@@ -19,6 +19,9 @@ DevMentor is a Next.js application organised as an **npm-workspaces monorepo**.
 | Admin (backend) pages | shadcn-ui (`base-nova` style, Base UI primitives) from `@devmentor/ui`, on Tailwind 4 |
 | Validation | Zod 4: one schema per input in `@devmentor/core/validators`, used by route handlers and forms |
 | Lint | ESLint 9 flat config, shared presets in `@devmentor/config` |
+| Unit tests | Vitest 5 + V8 coverage (100% enforced), Testing Library + jsdom for React |
+| Integration tests | Testcontainers (PostgreSQL 18) + `agent-browser` against the production build |
+| CI | GitHub Actions (`.github/workflows/ci.yml`): lint, type-check, build, unit, integration on every PR |
 | Package manager | npm workspaces. One root `package-lock.json`. Don't add yarn, pnpm, bun or Turborepo. |
 
 ```
@@ -29,7 +32,10 @@ DevMentor is a Next.js application organised as an **npm-workspaces monorepo**.
 │   ├── db/       @devmentor/db      MikroORM config, entities, repository/port adapters, migrations
 │   ├── ui/       @devmentor/ui      shadcn-ui components + theme (admin pages only)
 │   ├── shared/   @devmentor/shared  framework-free utilities and types (env helpers, errors, ...)
-│   └── config/   @devmentor/config  tsconfig presets, ESLint presets, `with-root-env` script
+│   ├── config/   @devmentor/config  tsconfig presets, ESLint presets, `with-root-env` script
+│   └── integration/ @devmentor/integration  browser integration tests (Testcontainers + agent-browser)
+├── .github/workflows/ci.yml         pull-request CI
+├── vitest.config.mts                unit-test projects + 100% coverage thresholds
 ├── .ai/                             AI metadata: specs, run logs, lessons (see below)
 ├── docker-compose.yml               local PostgreSQL
 ├── .env.example                     template for the single root `.env`
@@ -50,11 +56,15 @@ Run everything from the repository root.
 | Dev server (http://localhost:3000) | `npm run dev` |
 | Lint (all workspaces) | `npm run lint` |
 | Type-check (all workspaces, incl. `next typegen`) | `npm run typecheck` |
+| Unit tests (once / watch) | `npm test` / `npm run test:watch` |
+| Unit tests with the 100% coverage gate | `npm run test:coverage` |
+| Integration tests (needs Docker; Chrome via `npx agent-browser install` once) | `npm run test:integration` |
 | Production build / start | `npm run build` / `npm run start` |
 | Add a dependency to one package | `npm install <pkg> -w @devmentor/<name>` |
 | Add a shadcn component | `cd packages/app && npx shadcn@latest add <component>` |
 
-- There is no test runner yet. Never say tests pass. Verify with lint, type-check, build, and the running app for UI changes. If a spec needs automated tests, propose a test setup in the spec first.
+- Never say tests pass unless you ran them in this session. Report the exact commands you ran.
+- `vitest run --project <name> --coverage` reports no files with the root config. Run coverage for the whole repo.
 - Before starting `npm run dev`, check `packages/app/.next/dev/lock`. If a dev server is already running, use it instead of starting another one.
 - With the dev server running, `/_next/mcp` (tool `get_errors`) reports browser and server errors.
 - First-time setup: `cp .env.example .env && npm install && npm run db:up && npm run db:migrate && npm run dev`.
@@ -73,6 +83,7 @@ shared  <-  ui  <-----------  app
 - `db`: implements `core` ports with MikroORM. No `next`, `react`, `awilix`, `@devmentor/app` or `@devmentor/ui`.
 - `ui`: presentational React + shadcn only. No data access, no `core`, `db` or `app`.
 - `app`: integrates everything and is the only package that imports `awilix`.
+- `integration`: tests the running app through the browser only. It imports no workspace package.
 - The rules live in `packages/config/eslint/boundaries.mjs`. Never disable them. If a rule blocks you, the code is in the wrong package.
 
 ### Workspace packages
@@ -144,7 +155,7 @@ Every route and page reuses these instead of re-implementing fetch, validation o
 - `getOrm()` returns one `MikroORM` instance per process, cached on `globalThis` so HMR doesn't leak pools. **Never use the global `orm.em` in request code.** Always use the request-scoped forked `em` from the container.
 - Entities:
   - Use `defineEntity` + `p` and the class pattern (`class XEntity extends XSchema.class {}` + `setClass`). No decorators, no `reflect-metadata`.
-  - Register every entity in `packages/db/src/entities/index.ts`. Folder-based discovery is not used.
+  - Register every entity in the process-wide registry in `packages/db/src/entities/index.ts` and import entity classes only from there. Folder-based discovery is not used. Next.js bundles a copy of `@devmentor/db` into every route and page while `getOrm()` shares one ORM, so class identity must come from the registry (lesson `2026-10-13-mikro-orm-entity-identity-across-bundles`).
 - Every schema change ships as a migration:
   1. Change the entity.
   2. Run `npm run db:migration:create`.
@@ -170,6 +181,19 @@ Every route and page reuses these instead of re-implementing fetch, validation o
 - Package scripts that need env vars run through `with-root-env` (bin of `@devmentor/config`). Don't load env files from `next.config.ts`: Next.js resets `process.env` to its start-up snapshot, so the variables are lost.
 - Read env vars in server code only, through `requiredEnv` / `integerEnv` from `@devmentor/shared`. Client code may read only `NEXT_PUBLIC_*` vars.
 - Add every new variable to `.env.example` (no real secrets) and to the README env table.
+
+## Testing (mandatory)
+
+- **Every new feature or change ships with unit tests that keep coverage at 100%** (lines, branches, functions and statements). `npm run test:coverage` enforces it locally and in CI. A PR that lowers coverage fails.
+- Unit tests:
+  - Put them next to the code as `<file>.test.ts(x)`.
+  - Use Vitest. Use Testing Library for React (`environment: jsdom`) and add `// @vitest-environment node` to server-only tests.
+  - Mock ports, the `EntityManager`, `next/server`, `next/font` and the DI container. Never use a real database, the network or a browser.
+  - Test async Server Components by awaiting the component function and rendering its result.
+  - Shared test-only helpers are named `*.test-utils.ts(x)` and are excluded from coverage.
+- The coverage exclusions in `vitest.config.mts` cover only generated code (MikroORM migrations, shadcn CLI primitives), type declarations, test files and config files. Don't add hand-written code to them. Don't use `/* v8 ignore */` comments and don't lower the thresholds. If code can't be tested, change its design.
+- User-facing flows (new pages, forms and API workflows) also need integration tests in `packages/integration/src/*.test.ts`. They use the `Browser` helper (`agent-browser`) against the production build and an ephemeral PostgreSQL. They talk to the app only through the browser. Wait for streamed content (`waitForText`) before you interact with it. Every test asserts that the page logged no errors.
+- Any package with source code gets a `vitest.config.ts` (or `.mts` if its `package.json` has no `"type": "module"`), a `test` script and an entry in the root `vitest.config.mts` projects and coverage `include`.
 
 ## Next.js 16 conventions (summary)
 
@@ -289,7 +313,7 @@ Run log template:
 2. **Specify:** for non-trivial work, write or update the spec. If the user is available, ask them to approve it.
 3. **Log:** create the run log and write the plan in it.
 4. **Implement:** follow the spec in small, focused steps and keep the run log updated.
-5. **Verify:** run lint, type-check and build. For UI changes, check the page in the running app, including the browser console and the dev server output. Fix anything you broke.
+5. **Verify:** run lint, type-check, build, `npm run test:coverage` (100%) and, for user-facing or DB changes, `npm run test:integration`. For UI changes, also check the page in the running app, including the browser console and the dev server output. Fix anything you broke.
 6. **Learn:** record lessons.
 7. **Close:** tick the acceptance criteria, set the spec's status and move it to `implemented/`, and set the final run log status. Then tell the user what changed, how you verified it and what is still open.
 
@@ -307,6 +331,7 @@ Adapted from [Boris Cherny's Claude Code tips](https://ykdojo.github.io/claude-c
 
 - All acceptance criteria are met, or any deviation is documented in the spec and the run log.
 - `npm run lint`, the type-check and `npm run build` pass with no new warnings.
+- New and changed code is unit-tested and `npm run test:coverage` passes at 100%. User-facing flows have integration tests and `npm run test:integration` passes. The same jobs pass in CI.
 - UI changes have been checked in the running app.
 - There are no leftovers: no debug `console.log`, no commented-out code, no TODOs without context.
 - The spec, run log and lessons are updated, and a finished spec is in `implemented/`.
@@ -322,7 +347,7 @@ Adapted from [Boris Cherny's Claude Code tips](https://ykdojo.github.io/claude-c
 **Ask first**
 
 - Adding, removing or upgrading dependencies.
-- Changing `next.config.ts`, any `tsconfig.json`, any `eslint.config.mjs` or `@devmentor/config` presets, `docker-compose.yml`, or CI/deployment configuration.
+- Changing `next.config.ts`, any `tsconfig.json`, any `eslint.config.mjs`, any `vitest.config.*`, `@devmentor/config` presets, `docker-compose.yml`, or CI/deployment configuration (`.github/workflows/`).
 - Adding, removing or renaming a workspace package, or changing the dependency rules.
 - Deleting files, or refactoring beyond the scope of the spec.
 - Anything irreversible or that affects external systems: pushing, deploying, publishing, data migrations.
@@ -331,7 +356,7 @@ Adapted from [Boris Cherny's Claude Code tips](https://ykdojo.github.io/claude-c
 
 - Commit secrets or `.env*` files, or write secrets, tokens or personal data into `.ai/` files.
 - Push, force-push or rewrite git history without explicit permission.
-- Silence problems to make checks pass, for example by disabling lint rules or using `@ts-ignore`, `any` or skipped verification.
+- Silence problems to make checks pass, for example by disabling lint rules or using `@ts-ignore`, `any` or skipped verification. That includes skipped or `.only` tests, `v8 ignore` comments, new coverage exclusions for hand-written code and lowered coverage thresholds.
 - Delete specs, run logs or lessons.
 - Edit `node_modules/`, `.next/` or generated files such as `next-env.d.ts`.
 - Hand-edit the `<!-- BEGIN:nextjs-... -->` managed blocks in `packages/app/AGENTS.md`. `next dev` maintains them.

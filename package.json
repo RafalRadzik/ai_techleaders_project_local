@@ -15,6 +15,10 @@
     "start": "npm run start -w @devmentor/app",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "npm run test:integration -w @devmentor/integration",
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down",
     "db:migration:create": "npm run migration:create -w @devmentor/db --",
@@ -24,7 +28,9 @@
   },
   "devDependencies": {
     "@types/node": "^22",
+    "@vitest/coverage-v8": "^5.0.4",
     "eslint": "^9",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.0.4"
   }
 }

@@ -26,6 +26,9 @@ npm run dev               # http://localhost:3000
 | `npm run dev` / `build` / `start` | Next.js dev server / production build / production server (`@devmentor/app`) |
 | `npm run lint` | ESLint in every workspace (includes the package-boundary rules) |
 | `npm run typecheck` | `tsc --noEmit` in every workspace (`next typegen` first for the app) |
+| `npm test` / `npm run test:watch` | Vitest unit tests for every package (once / watch mode) |
+| `npm run test:coverage` | Unit tests with coverage; fails below 100% lines, branches, functions or statements |
+| `npm run test:integration` | Browser tests: PostgreSQL in Docker (Testcontainers), migrations, `next build` + `next start`, driven by `agent-browser` |
 | `npm run db:up` / `db:down` | Start / stop the local PostgreSQL container |
 | `npm run db:migration:create` | Generate a migration from entity changes (`-- --initial` for the first one) |
 | `npm run db:migrate` / `db:migrate:down` | Apply pending migrations / roll back the last one |
@@ -42,7 +45,8 @@ packages/
 ├── db/      @devmentor/db      MikroORM: config, entities, repositories (port adapters), migrations
 ├── ui/      @devmentor/ui      shadcn-ui components, theme and panel building blocks (apiCall, CrudForm, DataTable) for the admin pages
 ├── shared/  @devmentor/shared  Framework-free utilities and types (env helpers, error classes, API envelope, logger)
-└── config/  @devmentor/config  tsconfig + ESLint presets, `with-root-env` script
+├── config/  @devmentor/config  tsconfig + ESLint presets, `with-root-env` script
+└── integration/ @devmentor/integration  Browser integration tests (Testcontainers PostgreSQL + agent-browser); imports no workspace code
 ```
 
 Dependency direction. Arrows point to what a package may import. It is enforced by ESLint (`packages/config/eslint/boundaries.mjs`):
@@ -60,6 +64,12 @@ Dependency direction. Arrows point to what a package may import. It is enforced 
 - **`app` integrates everything.** It wires concrete implementations to ports in the Awilix container and exposes them through pages and route handlers.
 - **`ui` is presentational.** It holds shadcn-ui components without any data access.
 - Workspace packages are consumed as **TypeScript source** (their `exports` point at `src`). Turbopack transpiles them, so there is no per-package build.
+
+## Testing and CI
+
+- **Unit tests** (Vitest) sit next to the code they test as `<file>.test.ts(x)`. The root `vitest.config.mts` runs every package as a project and enforces **100% coverage** (lines, branches, functions, statements). Excluded: generated code (migrations, shadcn primitives), `*.test-utils.ts` helpers and config files. React code is tested with Testing Library on jsdom. Unit tests never touch a database, the network or a browser.
+- **Integration tests** (`packages/integration`) start PostgreSQL 18 with [Testcontainers](https://testcontainers.com/), apply the migrations, build and start the app on a free port, and drive it with [`agent-browser`](https://github.com/vercel-labs/agent-browser). They need Docker. Run `npx agent-browser install` once to download Chrome. `INTEGRATION_SKIP_BUILD=1` reuses an existing build and `INTEGRATION_DEBUG=1` prints the app's output.
+- **CI** (`.github/workflows/ci.yml`) runs on every pull request and on pushes to `main`. Its jobs are Lint, Type-check, Build, Unit tests (100% coverage) and Integration tests. To make them required, add them to the branch protection rules for `main`.
 
 ### Domain concepts
 
@@ -110,7 +120,7 @@ Request ─► Next.js page / route handler (packages/app)
 
 ### Database (MikroORM 7 + PostgreSQL)
 
-- **Entities:** defined with `defineEntity` (no decorators or reflect-metadata) and registered explicitly in `packages/db/src/entities/index.ts`.
+- **Entities:** defined with `defineEntity` (no decorators or reflect-metadata) and registered explicitly in the process-wide registry in `packages/db/src/entities/index.ts`. Import entity classes only from there: Next.js bundles a copy of `@devmentor/db` into every route and page, and they all have to share the class identity of the single ORM.
 - **Runtime config:** `createOrmConfig()` (`packages/db/src/config.ts`) reads `DATABASE_URL` and the pool settings.
 - **CLI config:** `packages/db/src/mikro-orm.config.ts` adds the Migrator. Migrations and their schema snapshot are in `packages/db/src/migrations`.
 - **ORM instance:** one per process (`getOrm()`), cached on `globalThis` to survive dev hot reloads without opening new pools.

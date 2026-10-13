@@ -38,6 +38,9 @@ Add a GitHub Actions CI (lint, typecheck, build, unit, integration), Vitest unit
 - Updated AGENTS.md (stack table, tree, commands, new "Testing (mandatory)" section with the 100% rule, entity registry rule, workflow/DoD/never rules, ask-first now covers `vitest.config.*` and workflows), CLAUDE.md, packages/app/AGENTS.md ("Testing this package") and README ("Testing and CI", scripts, packages, entity registry).
 - Found that `db:migrate` against the container wrote `packages/db/src/migrations/.snapshot-test.json`. Deleted it and set `MIKRO_ORM_MIGRATIONS_SNAPSHOT_ON_MIGRATE=false` in the integration env. Re-ran the tests: no file was created.
 
+- User asked to push. Created branch `feat/ci-and-testing`, committed and opened PR #2.
+- First CI run: Lint, Type-check and Unit passed. Build and Integration failed: `Cannot find module '@tailwindcss/oxide-linux-x64-gnu'` (npm/cli#4828). The lockfile on `main` already lacked 5 Linux native binaries. Targeted `--package-lock-only` refreshes (incl. `--os=linux`) didn't help, so I regenerated the lockfile from scratch in a temp dir. Drift: 24 of 783 top-level entries, all patch bumps or hoisting changes. Ran `npm ci` and re-verified everything locally (lint, typecheck, coverage 100%, integration 9/9).
+
 ## Changes
 
 - `package.json`, `package-lock.json`: test scripts; dev deps vitest, @vitest/coverage-v8.
@@ -67,6 +70,8 @@ Add a GitHub Actions CI (lint, typecheck, build, unit, integration), Vitest unit
 - Optional: upload agent-browser screenshots as CI artifacts when integration tests fail.
 
 ## Lessons recorded
+
+- `2026-10-13-lockfile-missing-linux-binaries`
 
 - `2026-10-13-mikro-orm-entity-identity-across-bundles`
 - `2026-10-13-vitest-and-agent-browser-setup`

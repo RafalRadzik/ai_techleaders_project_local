@@ -38,6 +38,7 @@ What fixed it, and what to do (or avoid) next time.
 ## Lessons
 
 <!-- Add new entries below this line, newest first -->
+- [2026-10-13] [lockfile-missing-linux-binaries](lessons/2026-10-13-lockfile-missing-linux-binaries.md) - macOS-made lockfile lacked Linux native binaries (npm/cli#4828), so `next build` failed in CI; regenerate the lockfile without `node_modules`
 - [2026-10-13] [mikro-orm-entity-identity-across-bundles](lessons/2026-10-13-mikro-orm-entity-identity-across-bundles.md) - Next.js bundles `@devmentor/db` per route while `getOrm()` is process-wide; share entity classes via the `entities/index.ts` registry or prod fails with "Metadata for entity g not found"
 - [2026-10-13] [vitest-and-agent-browser-setup](lessons/2026-10-13-vitest-and-agent-browser-setup.md) - Vitest coverage breaks with `--project`; `.mts` configs; mock `server-only`; drop `NODE_ENV` for spawned Next; agent-browser JSON, sessions and Suspense waits
 - [2026-10-13] [api-handler-wrapper](lessons/2026-10-13-api-handler-wrapper.md) - Route-handler wrappers: `connection()` outside `try`, resolve the request container once, send `data: null` not `undefined`, wrap option-taking factories for Awilix PROXY

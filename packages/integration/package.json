@@ -1,0 +1,18 @@
+{
+  "name": "@devmentor/integration",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DevMentor integration tests: the built app on an ephemeral PostgreSQL (Testcontainers), driven by agent-browser.",
+  "scripts": {
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test:integration": "vitest run"
+  },
+  "devDependencies": {
+    "@devmentor/config": "*",
+    "@testcontainers/postgresql": "^12.2.1",
+    "agent-browser": "^0.39.0",
+    "testcontainers": "^12.2.1"
+  }
+}

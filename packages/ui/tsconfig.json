@@ -2,8 +2,15 @@
   "extends": "@devmentor/config/tsconfig/react-library.json",
   "compilerOptions": {
     "paths": {
-      "@devmentor/ui/*": ["./src/*"]
+      "@devmentor/ui/*": [
+        "./src/*"
+      ]
     }
   },
-  "include": ["src", "*.mjs"]
+  "include": [
+    "src",
+    "*.mjs",
+    "vitest.config.ts",
+    "vitest.setup.ts"
+  ]
 }

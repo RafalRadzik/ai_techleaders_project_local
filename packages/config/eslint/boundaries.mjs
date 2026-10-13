@@ -3,6 +3,7 @@
  *
  *   shared  <- core <- db <- app
  *   shared  <- ui   <------- app
+ *   integration (tests the running app through the browser only)
  *
  * `app` is the composition root and may import every package, so it has no preset here.
  */
@@ -58,6 +59,16 @@ export const ui = rule([
     group: ["@devmentor/app", "@devmentor/app/*", "@devmentor/core", "@devmentor/core/*", "@devmentor/db", "@devmentor/db/*"],
     message: "@devmentor/ui is presentational: it may only depend on @devmentor/shared.",
   },
+  orm,
+  di,
+]);
+
+export const integration = rule([
+  {
+    group: ["@devmentor/*", "!@devmentor/config", "!@devmentor/config/*"],
+    message: "Integration tests drive the running app through the browser; don't import workspace code.",
+  },
+  frameworks,
   orm,
   di,
 ]);

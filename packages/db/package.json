@@ -16,7 +16,8 @@
     "migration:down": "with-root-env mikro-orm migration:down",
     "migration:list": "with-root-env mikro-orm migration:list",
     "migration:pending": "with-root-env mikro-orm migration:pending",
-    "migration:check": "with-root-env mikro-orm migration:check"
+    "migration:check": "with-root-env mikro-orm migration:check",
+    "test": "vitest run"
   },
   "mikro-orm": {
     "configPaths": [

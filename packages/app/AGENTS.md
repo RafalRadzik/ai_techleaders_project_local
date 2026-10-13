@@ -26,7 +26,16 @@ server/
 public/                static assets served from /
 components.json        shadcn CLI config (installs components into packages/ui)
 next.config.ts         cacheComponents, partialPrefetching, agentFeedback, Tailwind turbopack loader
+vitest.config.mts      unit tests (jsdom, `@/` alias); vitest.setup.ts mocks `server-only`
 ```
+
+## Testing this package
+
+- Every page, layout, component, route handler and `server/*` module has a colocated `*.test.ts(x)`, and coverage stays at 100% (see "Testing" in the root `AGENTS.md`).
+- Route handlers and `server/*`: add `// @vitest-environment node`, mock `next/server` (`connection`) and `@/server/container`, and build requests with `server/http/http.test-utils.ts`.
+- Async Server Components: call the page function, find the `<Suspense>` child, `await` its component function and render the result (see `app/(admin)/admin/page.test.tsx`). Root layouts: mock `next/font/google` and render with `renderToStaticMarkup`.
+- Client components: mock `@devmentor/ui/backend/api/apiCall` and drive them with Testing Library and `user-event`.
+- `next dev` alone isn't enough to verify a change: production minification and the per-route bundling of `next build` can break things that work in dev. `npm run test:integration` runs the production build.
 
 ## Next.js 16 conventions
 

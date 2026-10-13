@@ -38,3 +38,5 @@ What fixed it, and what to do (or avoid) next time.
 ## Lessons
 
 <!-- Add new entries below this line, newest first -->
+- [2026-10-13] [root-env-in-monorepo](lessons/2026-10-13-root-env-in-monorepo.md) - Load the root `.env` via `with-root-env` before Next.js starts; `loadEnvConfig`/`loadEnvFile` in `next.config.ts` doesn't reach request handlers
+- [2026-10-13] [npm-workspace-bin-linking](lessons/2026-10-13-npm-workspace-bin-linking.md) - After adding a `bin` to a linked workspace package, run `npm rebuild <pkg>`; `npm install` won't link it

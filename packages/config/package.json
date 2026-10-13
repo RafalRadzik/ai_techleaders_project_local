@@ -1,0 +1,30 @@
+{
+  "name": "@devmentor/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared TypeScript and ESLint presets for DevMentor packages.",
+  "bin": {
+    "with-root-env": "./bin/with-root-env.mjs"
+  },
+  "exports": {
+    "./tsconfig/base.json": "./tsconfig/base.json",
+    "./tsconfig/library.json": "./tsconfig/library.json",
+    "./tsconfig/react-library.json": "./tsconfig/react-library.json",
+    "./tsconfig/nextjs.json": "./tsconfig/nextjs.json",
+    "./eslint/base": "./eslint/base.mjs",
+    "./eslint/next": "./eslint/next.mjs",
+    "./eslint/boundaries": "./eslint/boundaries.mjs"
+  },
+  "scripts": {
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "eslint-config-next": "16.4.0",
+    "typescript-eslint": "^8.56.0"
+  },
+  "peerDependencies": {
+    "eslint": "^9",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@devmentor/app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DevMentor Next.js application: the integration package and DI composition root.",
+  "scripts": {
+    "dev": "with-root-env next dev",
+    "build": "with-root-env next build",
+    "start": "with-root-env next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit"
+  },
+  "dependencies": {
+    "@devmentor/core": "*",
+    "@devmentor/db": "*",
+    "@devmentor/shared": "*",
+    "@devmentor/ui": "*",
+    "awilix": "^13.0.5",
+    "next": "16.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@devmentor/config": "*",
+    "@tailwindcss/turbopack": "^4",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "tailwindcss": "^4"
+  }
+}

@@ -11,3 +11,4 @@ The full project instructions are in `AGENTS.md` (imported above) and apply in f
 - Write a spec before implementing non-trivial changes.
 - Never delete specs, runs or lessons; move or mark them instead.
 - Keep `CLAUDE.md` and `AGENTS.md` consistent when the `.ai/` structure changes.
+- **Monorepo:** respect the package dependency rules in `AGENTS.md` (`core` stays framework-free; only `app` uses Awilix; only `db` uses MikroORM; `ui` is presentational). Before working in `packages/app`, also read `packages/app/AGENTS.md`.

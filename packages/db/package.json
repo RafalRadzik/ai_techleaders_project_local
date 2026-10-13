@@ -1,0 +1,39 @@
+{
+  "name": "@devmentor/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DevMentor persistence: MikroORM (PostgreSQL) config, entities, repositories and migrations.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "mikro-orm": "with-root-env mikro-orm",
+    "migration:create": "with-root-env mikro-orm migration:create",
+    "migration:up": "with-root-env mikro-orm migration:up",
+    "migration:down": "with-root-env mikro-orm migration:down",
+    "migration:list": "with-root-env mikro-orm migration:list",
+    "migration:pending": "with-root-env mikro-orm migration:pending",
+    "migration:check": "with-root-env mikro-orm migration:check"
+  },
+  "mikro-orm": {
+    "configPaths": [
+      "./src/mikro-orm.config.ts"
+    ],
+    "tsLoader": "tsx"
+  },
+  "dependencies": {
+    "@devmentor/core": "*",
+    "@devmentor/shared": "*",
+    "@mikro-orm/core": "^7.2.5",
+    "@mikro-orm/migrations": "^7.2.5",
+    "@mikro-orm/postgresql": "^7.2.5"
+  },
+  "devDependencies": {
+    "@devmentor/config": "*",
+    "@mikro-orm/cli": "^7.2.5",
+    "tsx": "^4.23.15"
+  }
+}

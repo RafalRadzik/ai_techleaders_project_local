@@ -1,0 +1,17 @@
+{
+  "name": "@devmentor/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Framework-free utilities and types shared by all DevMentor packages.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@devmentor/config": "*"
+  }
+}

@@ -17,7 +17,8 @@
     "./eslint/boundaries": "./eslint/boundaries.mjs"
   },
   "scripts": {
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run"
   },
   "dependencies": {
     "eslint-config-next": "16.4.0",

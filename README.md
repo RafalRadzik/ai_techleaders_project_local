@@ -7,6 +7,14 @@ DevMentor is a web application built with Next.js 16, React 19 and TypeScript. I
 Prerequisites: Node.js ≥ 22.17 (MikroORM 7 requirement), npm 11, Docker (for the local database).
 
 ```bash
+npm run setup             # .env, npm install, PostgreSQL, migrations, then the dev server
+```
+
+`npm run setup` checks the prerequisites first and runs only the steps that are not done yet. It never overwrites an existing `.env`, and you can re-run it at any time: if a step fails, fix the problem and run it again to resume. It ends by starting the dev server in the foreground (Ctrl+C stops it). If a dev server is already running, it skips that step.
+
+### Manual setup (alternative)
+
+```bash
 cp .env.example .env      # single env file for the whole monorepo
 npm install               # installs and links all workspaces
 npm run db:up             # starts PostgreSQL 18 in Docker (waits until healthy)
@@ -23,6 +31,7 @@ npm run dev               # http://localhost:3000
 
 | Script | What it does |
 | --- | --- |
+| `npm run setup` | Idempotent first-time setup: prerequisite check, `.env`, `npm install`, PostgreSQL, migrations, dev server |
 | `npm run dev` / `build` / `start` | Next.js dev server / production build / production server (`@devmentor/app`) |
 | `npm run lint` | ESLint in every workspace (includes the package-boundary rules) |
 | `npm run typecheck` | `tsc --noEmit` in every workspace (`next typegen` first for the app) |

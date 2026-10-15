@@ -10,6 +10,7 @@
     "packages/*"
   ],
   "scripts": {
+    "setup": "node packages/config/bin/setup.mjs",
     "dev": "npm run dev -w @devmentor/app",
     "build": "npm run build -w @devmentor/app",
     "start": "npm run start -w @devmentor/app",

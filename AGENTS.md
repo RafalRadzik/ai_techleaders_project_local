@@ -48,6 +48,7 @@ Run everything from the repository root.
 
 | Purpose | Command |
 | --- | --- |
+| Idempotent first-time setup (`.env`, install, DB, migrations, dev server) | `npm run setup` |
 | Install dependencies (all workspaces) | `npm install` |
 | Start local PostgreSQL / stop it | `npm run db:up` / `npm run db:down` |
 | Apply migrations | `npm run db:migrate` |
@@ -67,7 +68,7 @@ Run everything from the repository root.
 - `vitest run --project <name> --coverage` reports no files with the root config. Run coverage for the whole repo.
 - Before starting `npm run dev`, check `packages/app/.next/dev/lock`. If a dev server is already running, use it instead of starting another one.
 - With the dev server running, `/_next/mcp` (tool `get_errors`) reports browser and server errors.
-- First-time setup: `cp .env.example .env && npm install && npm run db:up && npm run db:migrate && npm run dev`.
+- First-time setup: `npm run setup` (safe to re-run; skips completed steps). Manual equivalent: `cp .env.example .env && npm install && npm run db:up && npm run db:migrate && npm run dev`.
 
 ## Architecture rules
 

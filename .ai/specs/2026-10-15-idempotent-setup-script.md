@@ -1,6 +1,6 @@
 # Idempotent `npm run setup` for local development
 
-- **Status:** Approved
+- **Status:** In progress (implementation PR #7)
 - **Created:** 2026-10-15
 - **Issue:** #5
 - **Runs:** `.ai/runs/2026-10-15-idempotent-setup-script.md` (implementation run)
@@ -26,7 +26,7 @@ Flow: **preflight** → **env** → **install** → **db** → **migrate** → *
 | install | `node_modules/.package-lock.json` exists **and** its mtime ≥ `package-lock.json` mtime → skipped | `npm install` |
 | db | `docker compose ps --format json postgres` reports `State: running` **and** `Health: healthy` → skipped ("already healthy"). Parses both NDJSON and array output. Unparseable output counts as not healthy | `npm run db:up` (`docker compose up -d --wait`, waits until healthy) |
 | migrate | never skipped; `db:migrate` is a no-op when nothing is pending (A3) | `npm run db:migrate` |
-| dev | `packages/app/.next/dev/lock` exists **and** `GET http://localhost:${PORT:-3000}/api/health` answers with any HTTP status within 2 s → skipped ("dev server already running"). Lock present but no answer → fails as a stale lock (see Edge Cases) | `npm run dev` in the foreground, as the last step (A1). Async `spawn` forwards `SIGINT`/`SIGTERM` like `with-root-env.mjs` |
+| dev | `packages/app/.next/dev/lock` exists **and** `GET <lock appUrl>/api/health` answers with any HTTP status within 2 s → skipped. `next dev` records its real `appUrl` in the lock; the probe falls back to `http://localhost:${PORT:-3000}` only when the lock can't be parsed ("dev server already running"). Lock present but no answer → fails as a stale lock (see Edge Cases) | `npm run dev` in the foreground, as the last step (A1). Async `spawn` forwards `SIGINT`/`SIGTERM` like `with-root-env.mjs` |
 
 **Alternatives rejected:**
 - A shell script: not portable to Windows, and harder to unit-test.
@@ -51,7 +51,7 @@ Flow: **preflight** → **env** → **install** → **db** → **migrate** → *
 - **`.env.example` missing:** the env step fails with an explicit message. Exit non-zero.
 - **`npm install` / `db:up` / `db:migrate` fails:** the child's own output is shown (inherited stdio), followed by `✖ <step> failed (exit N)`. Setup exits with that code. A re-run skips the completed steps and retries from the failed one.
 - **Port 5432 taken by another PostgreSQL:** `db:up` fails, and Docker's error is shown verbatim. Setup does not try to work around it.
-- **Stale dev lock** (a dev server that crashed and left `packages/app/.next/dev/lock`): the health probe gets no answer, so the dev step fails with exit 1 and `✖ dev failed: stale lock <path> — no server answers on :<port>; delete the lock and re-run`. Setup never reports success without a running server.
+- **Stale dev lock** (a dev server that crashed and left `packages/app/.next/dev/lock`): the health probe gets no answer, so the dev step fails with exit 1 and `✖ dev failed: stale lock <path> — no server answers at <url>; delete the lock and re-run`. Setup never reports success without a running server.
 - **PostgreSQL container running but unhealthy or starting:** the db step is not skipped. `db:up` (`--wait`) waits for health or fails, so migrations never run against a database that is not ready.
 - **Ctrl+C / SIGTERM during `npm run dev`:** the signal is forwarded to the dev server. Setup then exits 0 with `dev server stopped`, because this is the normal way to end the foreground server, not a failed step. Any other non-zero dev exit is a failure.
 - **Install staleness after `git pull`:** a newer `package-lock.json` makes the mtime check fail, so `npm install` runs again.
@@ -93,7 +93,7 @@ Phase 1 only. It is one independently shippable PR: script, tests, wiring and do
    - Add a test asserting that the minimum Node version equals the root `engines.node`.
    - Verify: `npm run test:coverage` passes at 100%.
 3. **System adapter** (`system.mjs` + `system.test.mjs`).
-   - Write `createSystem(root)` and `main()`: `spawnSync`/`spawn`/`fs`/`fetch` wrappers, win32 `shell`, `COPYFILE_EXCL`, a missing file returned as `null` mtime, signal forwarding, and the probe timeout.
+   - Write `createSystem(root)` and `main()`: `spawnSync`/`spawn`/`fs` (including `readText` for the dev lock)/`fetch` wrappers, win32 `shell`, `COPYFILE_EXCL`, a missing file returned as `null` mtime, signal forwarding, and the probe timeout.
    - Tests mock `node:child_process`, `node:fs` and `fetch`.
    - Verify: coverage stays at 100%.
 4. **Entry + root script.** Add `packages/config/bin/setup.mjs` and `"setup": "node packages/config/bin/setup.mjs"`.

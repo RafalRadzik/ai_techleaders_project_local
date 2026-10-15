@@ -4,7 +4,7 @@
 - **Agent:** GitHub Copilot CLI / Claude Opus 5.5 (`om-auto-fix-issue` → `om-auto-write-spec` → `om-auto-implement-spec` → `om-auto-create-pr`)
 - **Spec:** `.ai/specs/2026-10-15-idempotent-setup-script.md` (spec PR #6)
 - **Issue:** #5
-- **Status:** in progress
+- **Status:** success
 
 Source doc: .ai/specs/2026-10-15-idempotent-setup-script.md
 
@@ -48,6 +48,13 @@ See the spec's Implementation Plan (Phase 1, steps 1–5). The spec file merges 
 - [x] 1.4 Entry and root script — 1f57b11
 - [x] 1.5 Docs — efb9487
 
+- `om-auto-review-pr` (fresh-context reviewer) approved with 1 minor and 2 nits, all fixed in b8a1fca:
+  - The dev probe now uses the `appUrl` recorded in the Next dev lock instead of assuming `PORT || 3000`.
+  - The `main` test now asserts root resolution.
+  - The test count in this log is corrected.
+  - A real re-run while dev was up reported `dev server already running at http://localhost:3000`.
+  - `npm run test:coverage` (100%) and `npm run lint -w @devmentor/config` pass. Typecheck and build are unaffected: `packages/config` has no typecheck, and the app does not import the setup logic.
+
 ## Changes
 
 - `packages/config/src/setup/{setup,system}.mjs` + tests: orchestration and side-effect adapter.
@@ -57,7 +64,7 @@ See the spec's Implementation Plan (Phase 1, steps 1–5). The spec file merges 
 
 ## Verification
 
-- `npx vitest run --project config`: 2 files and 46 tests pass.
+- `npx vitest run --project config`: 2 files and 51 tests pass, after the review fix.
 - Full gate, in this order: `npm run lint`, `npm run typecheck`, `npm run test:coverage` and `npm run build` all exit 0, with coverage at 100% on every metric.
 - Manual checks in the worktree:
   - The first `npm run setup` ran every step: created `.env`, skipped install (fresh `npm ci`), `db:up` brought PostgreSQL to healthy, applied 1 migration and started dev. `/api/health` returned 200.
@@ -66,4 +73,10 @@ See the spec's Implementation Plan (Phase 1, steps 1–5). The spec file merges 
   - A hand-made stale lock with no server failed with `✖ dev failed (stale lock …)`, exit 1.
 - Not checked by hand: Node below 22.17 and a stopped Docker daemon (unit-tested), and Windows.
 
+## Open issues / next steps
+
+- Merge spec PR #6 and then this PR. After both are in, move the spec to `.ai/specs/implemented/`; it lives on the spec branch, so it can't move here.
+
 ## Lessons recorded
+
+- `2026-10-15-next-dev-lock-records-app-url`

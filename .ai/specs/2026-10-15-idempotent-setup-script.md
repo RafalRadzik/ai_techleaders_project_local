@@ -50,7 +50,7 @@ Flow: **preflight** → **env** → **install** → **db** → **migrate** → *
 - **Node too old / Docker missing / daemon down:** preflight fails with `✖ preflight failed: <message>`, where the message names the requirement and what to do:
   - `Node.js >= 22.17.0 is required (found vX).`
   - `Docker with the Compose plugin is required. Install Docker Desktop (or docker + docker compose).`
-  - `The Docker daemon is not running. Start Docker and re-run \`npm run setup\`.`
+  - ``The Docker daemon is not running. Start Docker and re-run `npm run setup`.``
 
   Exit 1. No file is written.
 - **`.env.example` missing:** the env step fails with an explicit message. Exit non-zero.

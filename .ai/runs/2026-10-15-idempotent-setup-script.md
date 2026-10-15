@@ -38,6 +38,8 @@ See the spec's Implementation Plan (Phase 1, steps 1–5). The spec file merges 
 
 ## Progress
 
+PR: #7
+
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not rename step titles.
 
 ### Phase 1: npm run setup

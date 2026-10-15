@@ -1,4 +1,0 @@
-{
-  "extends": "@devmentor/config/tsconfig/library.json",
-  "include": ["src", "*.mjs", "vitest.config.ts"]
-}

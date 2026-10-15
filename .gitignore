@@ -1,7 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-node_modules
+/node_modules
+**/node_modules
 /.pnp
 .pnp.*
 .yarn/*
@@ -11,15 +12,18 @@ node_modules
 !.yarn/versions
 
 # testing
-coverage
+/coverage
+/test-results
 
 # next.js
-.next/
-out/
+/.next/
+**/.next/
+/out/
+**/out/
 
 # production
-build
-dist
+/build
+**/dist/
 
 # misc
 .DS_Store
@@ -40,9 +44,8 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
 
-# agent pipeline QA state (generated per run)
+# agent pipeline (om-setup-agent-pipeline): per-run QA state, never source
 .ai/qa/artifacts_*/
 .ai/qa/test-env.json
 .ai/qa/test-env.env

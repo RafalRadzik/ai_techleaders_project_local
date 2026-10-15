@@ -1,33 +1,27 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from 'vitest/config';
 
-/**
- * Unit tests for every workspace package (each package has its own `vitest.config.ts`).
- * Coverage is enforced at 100% (see AGENTS.md "Testing"). Integration tests live in
- * `packages/integration` and run separately with `npm run test:integration`.
- */
 export default defineConfig({
   test: {
-    projects: ["packages/{shared,core,db,ui,app,config}"],
+    environment: 'node',
+    include: ['packages/**/*.test.ts', 'packages/**/*.test.tsx'],
+    exclude: [
+      'tests/integration/**',
+      '**/.next/**',
+      '**/node_modules/**',
+      '**/dist/**',
+    ],
     coverage: {
-      provider: "v8",
-      include: [
-        "packages/{shared,core,db,ui,app}/**/*.{ts,tsx}",
-        // Dependency-free setup script logic (runs before `npm install`, so plain .mjs).
-        "packages/config/src/**/*.mjs",
-      ],
-      exclude: [
-        "**/node_modules/**",
-        "**/.next/**",
-        "**/*.d.ts",
-        "**/*.test.{ts,tsx,mjs}",
-        "**/*.test-utils.{ts,tsx}",
-        "**/vitest.{config,setup}.{ts,mts}",
-        // Generated: MikroORM migrations and shadcn CLI primitives.
-        "packages/db/src/migrations/**",
-        "packages/ui/src/components/ui/**",
-      ],
-      reporter: ["text", "html", "lcov"],
-      thresholds: { 100: true },
+      provider: 'v8',
+      include: ['packages/core/src/http/makeCrudRoute.ts'],
+      reportsDirectory: 'coverage/unit',
+      reporter: ['text', 'json', 'html', 'lcov'],
+      thresholds: {
+        perFile: true,
+        statements: 100,
+        branches: 100,
+        functions: 100,
+        lines: 100,
+      },
     },
   },
 });

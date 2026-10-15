@@ -1,15 +1,16 @@
-import { cn } from "cn";
+import { cn } from '../../lib/utils';
 
-interface LoadingMessageProps {
-  label?: string;
+/** The sanctioned loading renderer — pages compose this instead of a bespoke spinner. */
+export function LoadingMessage({
+  message = 'Loading…',
+  className,
+}: {
+  message?: string;
   className?: string;
-}
-
-export function LoadingMessage({ label = "Loading…", className }: LoadingMessageProps) {
+}) {
   return (
-    <div role="status" aria-live="polite" className={cn("text-muted-foreground flex items-center gap-2 py-6 text-sm", className)}>
-      <span aria-hidden className="border-muted-foreground/40 border-t-foreground size-4 animate-spin rounded-full border-2" />
-      {label}
-    </div>
+    <p role="status" className={cn('text-sm text-muted-foreground', className)}>
+      {message}
+    </p>
   );
 }

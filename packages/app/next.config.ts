@@ -1,20 +1,18 @@
 import type { NextConfig } from "next";
 
-// Env vars come from the monorepo root `.env`, loaded by `with-root-env` in the package scripts.
 const nextConfig: NextConfig = {
-  experimental: {
-    agentFeedback: true,
-  },
-  cacheComponents: true,
-  partialPrefetching: true,
-  turbopack: {
-    rules: {
-      "*.css": {
-        loaders: ["@tailwindcss/turbopack"],
-        as: "*.css",
-      },
-    },
-  },
+  allowedDevOrigins: ["*"],
+  // Workspace packages are shipped as TypeScript source; Next transpiles them.
+  transpilePackages: ["@devmentor/core", "@devmentor/db", "@devmentor/ui"],
+  // Keep the ORM and its driver out of the bundle — they are Node-only and rely on
+  // dynamic requires that must not be bundled.
+  serverExternalPackages: [
+    "@mikro-orm/core",
+    "@mikro-orm/postgresql",
+    "@mikro-orm/migrations",
+    "@mikro-orm/seeder",
+    "pino",
+  ],
 };
 
 export default nextConfig;

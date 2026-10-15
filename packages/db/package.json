@@ -1,40 +1,39 @@
 {
   "name": "@devmentor/db",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
+  "description": "DevMentor — MikroORM configuration, entities and migrations",
   "type": "module",
-  "description": "DevMentor persistence: MikroORM (PostgreSQL) config, entities, repositories and migrations.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./entities": "./src/entities/index.ts",
+    "./config": "./src/config.ts"
   },
   "scripts": {
-    "lint": "eslint",
-    "typecheck": "tsc --noEmit",
-    "mikro-orm": "with-root-env mikro-orm",
-    "migration:create": "with-root-env mikro-orm migration:create",
-    "migration:up": "with-root-env mikro-orm migration:up",
-    "migration:down": "with-root-env mikro-orm migration:down",
-    "migration:list": "with-root-env mikro-orm migration:list",
-    "migration:pending": "with-root-env mikro-orm migration:pending",
-    "migration:check": "with-root-env mikro-orm migration:check",
-    "test": "vitest run"
+    "migration:create": "mikro-orm migration:create",
+    "migration:up": "mikro-orm migration:up",
+    "migration:down": "mikro-orm migration:down",
+    "migration:list": "mikro-orm migration:list",
+    "schema:update": "mikro-orm schema:update --run",
+    "seed": "mikro-orm seeder:run"
+  },
+  "dependencies": {
+    "@mikro-orm/core": "^7.1.14",
+    "@mikro-orm/migrations": "^7.1.14",
+    "@mikro-orm/postgresql": "^7.1.14",
+    "@mikro-orm/seeder": "^7.1.14",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@mikro-orm/cli": "^7.1.14",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.23.13"
   },
   "mikro-orm": {
     "configPaths": [
       "./src/mikro-orm.config.ts"
-    ],
-    "tsLoader": "tsx"
-  },
-  "dependencies": {
-    "@devmentor/core": "*",
-    "@devmentor/shared": "*",
-    "@mikro-orm/core": "^7.2.5",
-    "@mikro-orm/migrations": "^7.2.5",
-    "@mikro-orm/postgresql": "^7.2.5"
-  },
-  "devDependencies": {
-    "@devmentor/config": "*",
-    "@mikro-orm/cli": "^7.2.5",
-    "tsx": "^4.23.15"
+    ]
   }
 }

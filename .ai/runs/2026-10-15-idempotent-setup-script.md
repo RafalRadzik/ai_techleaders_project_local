@@ -56,6 +56,7 @@ PR: #7
   - The test count in this log is corrected.
   - A real re-run while dev was up reported `dev server already running at http://localhost:3000`.
   - `npm run test:coverage` (100%) and `npm run lint -w @devmentor/config` pass. Typecheck and build are unaffected: `packages/config` has no typecheck, and the app does not import the setup logic.
+- Slip: `git add .ai` in 5cc3704 also committed the uncommitted spec copy I had pulled into the worktree from #6. Removed again in the following commit. Next time, stage `.ai/` paths explicitly when a spec copy is present.
 
 ## Changes
 

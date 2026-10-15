@@ -6,6 +6,7 @@ import {
   MIN_NODE_VERSION,
   STEPS,
   compareVersions,
+  devServerUrl,
   isPostgresHealthy,
   parseComposePs,
   preflight,
@@ -32,6 +33,7 @@ function fakeSystem(overrides = {}) {
     runForeground: vi.fn(async () => ({ code: 0, interrupted: false })),
     probe: vi.fn(async () => true),
     exists: (path) => files.has(path),
+    readText: () => JSON.stringify({ appUrl: "http://localhost:3000" }),
     mtimeMs: (path) => (path === "package-lock.json" ? 100 : 200),
     copyFileExclusive: vi.fn(),
     ...overrides,
@@ -185,14 +187,31 @@ describe("migrate step", () => {
   });
 });
 
+describe("devServerUrl", () => {
+  it("uses the appUrl recorded in the dev lock", () => {
+    const system = fakeSystem({ readText: () => JSON.stringify({ appUrl: "http://localhost:3001/" }) });
+    expect(devServerUrl(system)).toBe("http://localhost:3001");
+  });
+
+  it.each([
+    ["the lock is unreadable", () => null],
+    ["the lock is not JSON", () => "pid 123"],
+    ["the lock has no appUrl", () => JSON.stringify({ port: 3001 })],
+    ["the appUrl is empty", () => JSON.stringify({ appUrl: "" })],
+  ])("falls back to PORT when %s", (_, readText) => {
+    expect(devServerUrl(fakeSystem({ readText, env: { PORT: "4000" } }))).toBe("http://localhost:4000");
+    expect(devServerUrl(fakeSystem({ readText }))).toBe("http://localhost:3000");
+  });
+});
+
 describe("dev step", () => {
-  it("skips when the lock exists and the server answers", async () => {
-    const system = fakeSystem({ env: { PORT: "4000" } });
+  it("skips when the lock exists and its server answers", async () => {
+    const system = fakeSystem({ readText: () => JSON.stringify({ appUrl: "http://localhost:3001" }) });
     expect(await step("dev").run(system)).toEqual({
       status: "skipped",
-      detail: "dev server already running on :4000",
+      detail: "dev server already running at http://localhost:3001",
     });
-    expect(system.probe).toHaveBeenCalledWith("http://localhost:4000/api/health");
+    expect(system.probe).toHaveBeenCalledWith("http://localhost:3001/api/health");
     expect(system.runForeground).not.toHaveBeenCalled();
   });
 
@@ -200,7 +219,9 @@ describe("dev step", () => {
     const result = await step("dev").run(fakeSystem({ probe: vi.fn(async () => false) }));
     expect(result.status).toBe("failed");
     expect(result.code).toBe(1);
-    expect(result.detail).toContain(`stale lock ${DEV_LOCK_PATH}: no server answers on :3000`);
+    expect(result.detail).toBe(
+      `stale lock ${DEV_LOCK_PATH}: no server answers at http://localhost:3000. Delete the lock and re-run`,
+    );
   });
 
   it("starts npm run dev in the foreground without a lock", async () => {
@@ -240,7 +261,7 @@ describe("runSetup", () => {
       "↷ install skipped (dependencies up to date)",
       "↷ db skipped (PostgreSQL already healthy)",
       "✔ migrate done",
-      "↷ dev skipped (dev server already running on :3000)",
+      "↷ dev skipped (dev server already running at http://localhost:3000)",
     ]);
   });
 

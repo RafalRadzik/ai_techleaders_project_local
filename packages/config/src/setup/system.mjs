@@ -1,6 +1,6 @@
 /** Real side effects for `runSetup`: child processes, the file system, the health probe and logging. */
 import { spawn, spawnSync } from "node:child_process";
-import { constants, copyFileSync, existsSync, statSync } from "node:fs";
+import { constants, copyFileSync, existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -60,6 +60,13 @@ export function createSystem(root, proc = process) {
       }
     },
     exists: (path) => existsSync(resolve(path)),
+    readText(path) {
+      try {
+        return readFileSync(resolve(path), "utf8");
+      } catch {
+        return null;
+      }
+    },
     mtimeMs: (path) => statSync(resolve(path), { throwIfNoEntry: false })?.mtimeMs ?? null,
     copyFileExclusive: (from, to) => copyFileSync(resolve(from), resolve(to), constants.COPYFILE_EXCL),
   };

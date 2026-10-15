@@ -36,6 +36,21 @@ export function parseComposePs(output) {
   }
 }
 
+/**
+ * Base URL of the dev server owning the lock. `next dev` records its real `appUrl` in the lock (it
+ * moves to the next free port when 3000 is taken and reads `PORT` from the root `.env`); fall back
+ * to `PORT` / 3000 when the lock is unreadable.
+ */
+export function devServerUrl(system) {
+  try {
+    const { appUrl } = JSON.parse(system.readText(DEV_LOCK_PATH) ?? "");
+    if (typeof appUrl === "string" && appUrl !== "") return appUrl.replace(/\/$/, "");
+  } catch {
+    // Unreadable lock: use the configured port below.
+  }
+  return `http://localhost:${system.env.PORT || "3000"}`;
+}
+
 export function isPostgresHealthy(services) {
   return services.some(
     (service) =>
@@ -106,15 +121,12 @@ export const STEPS = [
   {
     name: "dev",
     async run(system) {
-      const port = system.env.PORT || "3000";
       if (system.exists(DEV_LOCK_PATH)) {
-        if (await system.probe(`http://localhost:${port}/api/health`)) {
-          return skipped(`dev server already running on :${port}`);
+        const url = devServerUrl(system);
+        if (await system.probe(`${url}/api/health`)) {
+          return skipped(`dev server already running at ${url}`);
         }
-        return failed(
-          1,
-          `stale lock ${DEV_LOCK_PATH}: no server answers on :${port}. Delete the lock and re-run`,
-        );
+        return failed(1, `stale lock ${DEV_LOCK_PATH}: no server answers at ${url}. Delete the lock and re-run`);
       }
       const { code, interrupted } = await system.runForeground("npm", ["run", "dev"]);
       if (interrupted) return done("dev server stopped");

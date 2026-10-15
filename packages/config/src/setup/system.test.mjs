@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("node:child_process", () => ({ spawn: vi.fn(), spawnSync: vi.fn() }));
@@ -9,12 +10,13 @@ vi.mock("node:fs", async (importOriginal) => {
     ...actual,
     copyFileSync: vi.fn(),
     existsSync: vi.fn(),
+    readFileSync: vi.fn(),
     statSync: vi.fn(),
   };
 });
 
 const { spawn, spawnSync } = await import("node:child_process");
-const { constants, copyFileSync, existsSync, statSync } = await import("node:fs");
+const { constants, copyFileSync, existsSync, readFileSync, statSync } = await import("node:fs");
 const { createSystem, main } = await import("./system.mjs");
 
 /** A fake `process`: signal listeners, platform, versions, env and stdout. */
@@ -92,6 +94,19 @@ describe("createSystem", () => {
     expect(system.mtimeMs("missing")).toBeNull();
   });
 
+  it("reads text files and returns null when they cannot be read", () => {
+    vi.mocked(readFileSync)
+      .mockReturnValueOnce("content")
+      .mockImplementationOnce(() => {
+        throw new Error("ENOENT");
+      });
+    const system = createSystem("/repo", fakeProcess());
+
+    expect(system.readText("lock")).toBe("content");
+    expect(readFileSync).toHaveBeenCalledWith(join("/repo", "lock"), "utf8");
+    expect(system.readText("missing")).toBeNull();
+  });
+
   it("copies files without overwriting the destination", () => {
     createSystem("/repo", fakeProcess()).copyFileExclusive(".env.example", ".env");
     expect(copyFileSync).toHaveBeenCalledWith(
@@ -166,11 +181,14 @@ describe("createSystem", () => {
 
 describe("main", () => {
   it("runs setup from the monorepo root", async () => {
+    const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
+    vi.mocked(spawnSync).mockReturnValue({ status: 0, stdout: "" });
+    vi.mocked(existsSync).mockReturnValue(false);
     const proc = fakeProcess();
-    proc.versions = { node: "20.0.0" };
+
     expect(await main(proc)).toBe(1);
-    expect(proc.stdout.write).toHaveBeenCalledWith(
-      "✖ preflight failed: Node.js >= 22.17.0 is required (found v20.0.0).\n",
-    );
+    expect(existsSync).toHaveBeenCalledWith(join(repoRoot, ".env"));
+    expect(existsSync).toHaveBeenCalledWith(join(repoRoot, ".env.example"));
+    expect(proc.stdout.write).toHaveBeenCalledWith("✖ env failed (.env.example not found)\n");
   });
 });

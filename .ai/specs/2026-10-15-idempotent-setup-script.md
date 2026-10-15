@@ -37,7 +37,7 @@ Flow: **preflight** → **env** → **install** → **db** → **migrate** → *
 
 | Piece | Path | Role |
 | --- | --- | --- |
-| Setup logic (new) | `packages/config/src/setup/setup.mjs` | Pure orchestration. `compareVersions`, `preflight`, `parseComposePs`, the step table and `async runSetup(system)` take an injected `system` (`run`, `capture`, `runForeground`, `probe`, `exists`, `mtimeMs`, `copyFileExclusive`, `log`, `nodeVersion`, `env`, `root`) and resolve to the exit code. Fully unit-tested |
+| Setup logic (new) | `packages/config/src/setup/setup.mjs` | Pure orchestration. `compareVersions`, `preflight`, `parseComposePs`, the step table and `async runSetup(system)` take an injected `system` (`run`, `capture`, `runForeground`, `probe`, `exists`, `readText`, `mtimeMs`, `copyFileExclusive`, `log`, `nodeVersion`, `env`, `root`) and resolve to the exit code. Fully unit-tested |
 | System adapter (new) | `packages/config/src/setup/system.mjs` | `createSystem(root)`: `spawnSync` wrappers (`stdio: "inherit"` or captured, `shell` on win32), the async foreground `spawn` with signal forwarding, a `fetch` health probe with `AbortSignal.timeout`, and `node:fs` wrappers. Also `main()`, which resolves the repo root and returns `runSetup(createSystem(root))`. Unit-tested with mocked `node:child_process` / `node:fs` / `fetch` |
 | Entry (new) | `packages/config/bin/setup.mjs` | One line of glue: `process.exitCode = await main()`. It sits next to `with-root-env.mjs` and, like it, outside the coverage `include`. All logic, including `main`, is in covered `src/` |
 | Root script (new) | `package.json#scripts.setup` | `node packages/config/bin/setup.mjs` |
@@ -47,11 +47,16 @@ Flow: **preflight** → **env** → **install** → **db** → **migrate** → *
 
 ## 📝 Edge Cases & Failure Scenarios
 
-- **Node too old / Docker missing / daemon down:** preflight fails with a message that names the requirement (`Node.js >= 22.17.0 required, found vX`, `Docker is not installed`, `Docker daemon is not running — start Docker Desktop`). Exit 1. No file is written.
+- **Node too old / Docker missing / daemon down:** preflight fails with `✖ preflight failed: <message>`, where the message names the requirement and what to do:
+  - `Node.js >= 22.17.0 is required (found vX).`
+  - `Docker with the Compose plugin is required. Install Docker Desktop (or docker + docker compose).`
+  - `The Docker daemon is not running. Start Docker and re-run \`npm run setup\`.`
+
+  Exit 1. No file is written.
 - **`.env.example` missing:** the env step fails with an explicit message. Exit non-zero.
 - **`npm install` / `db:up` / `db:migrate` fails:** the child's own output is shown (inherited stdio), followed by `✖ <step> failed (exit N)`. Setup exits with that code. A re-run skips the completed steps and retries from the failed one.
 - **Port 5432 taken by another PostgreSQL:** `db:up` fails, and Docker's error is shown verbatim. Setup does not try to work around it.
-- **Stale dev lock** (a dev server that crashed and left `packages/app/.next/dev/lock`): the health probe gets no answer, so the dev step fails with exit 1 and `✖ dev failed: stale lock <path> — no server answers at <url>; delete the lock and re-run`. Setup never reports success without a running server.
+- **Stale dev lock** (a dev server that crashed and left `packages/app/.next/dev/lock`): the health probe gets no answer, so the dev step fails with exit 1 and `✖ dev failed (stale lock <path>: no server answers at <url>. Delete the lock and re-run)`. Setup never reports success without a running server.
 - **PostgreSQL container running but unhealthy or starting:** the db step is not skipped. `db:up` (`--wait`) waits for health or fails, so migrations never run against a database that is not ready.
 - **Ctrl+C / SIGTERM during `npm run dev`:** the signal is forwarded to the dev server. Setup then exits 0 with `dev server stopped`, because this is the normal way to end the foreground server, not a failed step. Any other non-zero dev exit is a failure.
 - **Install staleness after `git pull`:** a newer `package-lock.json` makes the mtime check fail, so `npm install` runs again.
@@ -63,7 +68,7 @@ Flow: **preflight** → **env** → **install** → **db** → **migrate** → *
 - **Reconciliation with `AGENTS.md`:**
   - `packages/config` has no `typecheck` script, and adding JS type-checking would need a new `tsconfig.json` ("Ask first"). It stays out of scope, as for the existing `with-root-env.mjs`.
   - The one-line `bin/setup.mjs` is uncovered glue, as `with-root-env.mjs` is today. All logic it calls is in `src/` with 100% coverage.
-- **Reversibility:** delete the script entry and the three files. Nothing persists outside the developer's own checkout (`.env`, `node_modules`, the Docker volume, all created by the existing commands).
+- **Reversibility:** delete the `setup` script entry, the five new files (`bin/setup.mjs`, `src/setup/{setup,system}.mjs` and their two tests) and `packages/config/vitest.config.ts`, then revert the `test` script and the `vitest.config.mts` lines. Nothing persists outside the developer's own checkout (`.env`, `node_modules`, the Docker volume, all created by the existing commands).
 
 ## Resolved assumptions (autonomous defaults)
 
@@ -71,7 +76,7 @@ The maintainer answered all three in the authoring session, so none needs furthe
 
 | # | Question | Answer | Rationale |
 | --- | --- | --- | --- |
-| A1 | Start the dev server as the last step, or stop after migrations? | Start `npm run dev` in the foreground. Skipped when `packages/app/.next/dev/lock` exists | Matches the README sequence and the issue's "app reachable" done-criterion. A re-run still exits 0 while a server is up |
+| A1 | Start the dev server as the last step, or stop after migrations? | Start `npm run dev` in the foreground. Skipped when `packages/app/.next/dev/lock` exists **and** the server at the lock's `appUrl` answers `/api/health`. A lock with no answering server fails as stale | Matches the README sequence and the issue's "app reachable" done-criterion. A re-run still exits 0 while a server is up |
 | A2 | Where do the script's unit tests run? | A new `config` Vitest project, with `packages/config/src/**/*.mjs` in coverage `include` (100% gate, runs in CI) | Keeps the "every change ships with 100%-covered tests" rule without a parallel test runner |
 | A3 | How does the migrate step decide to skip? | It never skips: it always runs `npm run db:migrate`, which is a no-op when nothing is pending | `migration:pending` has no machine-readable output (it prints a table and exits 0 either way) |
 
@@ -106,9 +111,9 @@ Phase 1 only. It is one independently shippable PR: script, tests, wiring and do
 
 ## Acceptance criteria
 
-- [ ] An orphaned dev lock with no server running fails with a clear stale-lock message. It never reports success.
 - [ ] On a fresh clone, `npm run setup` ends with `.env` present, dependencies installed, PostgreSQL healthy, migrations applied and the dev server running (`/api/health` → `200`).
 - [ ] A second `npm run setup` exits 0 and reports env, install, db and dev as skipped. An existing `.env` is never overwritten.
+- [ ] An orphaned dev lock with no server running fails with a clear stale-lock message. It never reports success.
 - [ ] Node < 22.17 or a missing Docker / stopped daemon fails before any step, with a clear message and a non-zero exit.
 - [ ] A failing step stops the run with a non-zero exit, and a re-run resumes from that step.
 - [ ] The new logic has 100% unit-test coverage in the `config` Vitest project, and `npm run test:coverage` passes.

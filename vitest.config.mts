@@ -7,15 +7,19 @@ import { defineConfig } from "vitest/config";
  */
 export default defineConfig({
   test: {
-    projects: ["packages/{shared,core,db,ui,app}"],
+    projects: ["packages/{shared,core,db,ui,app,config}"],
     coverage: {
       provider: "v8",
-      include: ["packages/{shared,core,db,ui,app}/**/*.{ts,tsx}"],
+      include: [
+        "packages/{shared,core,db,ui,app}/**/*.{ts,tsx}",
+        // Dependency-free setup script logic (runs before `npm install`, so plain .mjs).
+        "packages/config/src/**/*.mjs",
+      ],
       exclude: [
         "**/node_modules/**",
         "**/.next/**",
         "**/*.d.ts",
-        "**/*.test.{ts,tsx}",
+        "**/*.test.{ts,tsx,mjs}",
         "**/*.test-utils.{ts,tsx}",
         "**/vitest.{config,setup}.{ts,mts}",
         // Generated: MikroORM migrations and shadcn CLI primitives.

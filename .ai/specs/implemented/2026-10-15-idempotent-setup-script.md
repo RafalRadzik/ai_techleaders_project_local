@@ -1,6 +1,6 @@
 # Idempotent `npm run setup` for local development
 
-- **Status:** In progress (implementation PR #7)
+- **Status:** Implemented (spec PR #6, implementation PR #7)
 - **Created:** 2026-10-15
 - **Issue:** #5
 - **Runs:** `.ai/runs/2026-10-15-idempotent-setup-script.md` (implementation run)
@@ -111,10 +111,10 @@ Phase 1 only. It is one independently shippable PR: script, tests, wiring and do
 
 ## Acceptance criteria
 
-- [ ] On a fresh clone, `npm run setup` ends with `.env` present, dependencies installed, PostgreSQL healthy, migrations applied and the dev server running (`/api/health` → `200`).
-- [ ] A second `npm run setup` exits 0 and reports env, install, db and dev as skipped. An existing `.env` is never overwritten.
-- [ ] An orphaned dev lock with no server running fails with a clear stale-lock message. It never reports success.
-- [ ] Node < 22.17 or a missing Docker / stopped daemon fails before any step, with a clear message and a non-zero exit.
-- [ ] A failing step stops the run with a non-zero exit, and a re-run resumes from that step.
-- [ ] The new logic has 100% unit-test coverage in the `config` Vitest project, and `npm run test:coverage` passes.
-- [ ] README shows `npm run setup` first and keeps the manual commands under "Manual setup (alternative)". AGENTS.md lists the command.
+- [x] On a fresh clone, `npm run setup` ends with `.env` present, dependencies installed, PostgreSQL healthy, migrations applied and the dev server running (`/api/health` → `200`).
+- [x] A second `npm run setup` exits 0 and reports env, install, db and dev as skipped. An existing `.env` is never overwritten.
+- [x] An orphaned dev lock with no server running fails with a clear stale-lock message. It never reports success.
+- [x] Node < 22.17 or a missing Docker / stopped daemon fails before any step, with a clear message and a non-zero exit.
+- [x] A failing step stops the run with a non-zero exit, and a re-run resumes from that step.
+- [x] The new logic has 100% unit-test coverage in the `config` Vitest project, and `npm run test:coverage` passes.
+- [x] README shows `npm run setup` first and keeps the manual commands under "Manual setup (alternative)". AGENTS.md lists the command.

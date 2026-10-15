@@ -2,11 +2,11 @@
 
 - **Date:** 2026-10-15
 - **Agent:** GitHub Copilot CLI / Claude Opus 5.5 (`om-auto-fix-issue` → `om-auto-write-spec` → `om-auto-implement-spec` → `om-auto-create-pr`)
-- **Spec:** `.ai/specs/2026-10-15-idempotent-setup-script.md` (spec PR #6)
+- **Spec:** `.ai/specs/implemented/2026-10-15-idempotent-setup-script.md` (spec PR #6)
 - **Issue:** #5
 - **Status:** success
 
-Source doc: .ai/specs/2026-10-15-idempotent-setup-script.md
+Source doc: .ai/specs/implemented/2026-10-15-idempotent-setup-script.md
 
 ## Goal
 
@@ -78,7 +78,8 @@ PR: #7
 
 ## Open issues / next steps
 
-- Merge spec PR #6 and then this PR. After both are in, move the spec to `.ai/specs/implemented/`; it lives on the spec branch, so it can't move here.
+- Spec PR #6 merged. Merged `main` into this branch and moved the spec to `.ai/specs/implemented/` (Status: Implemented, criteria ticked), so it flips together with the implementation.
+- Remaining: maintainer approval and merge of this PR.
 
 ## Lessons recorded
 

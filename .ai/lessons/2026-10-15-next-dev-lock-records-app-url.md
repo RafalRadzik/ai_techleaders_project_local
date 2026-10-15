@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-15
 - **Category:** tooling
-- **Related:** `.ai/specs/2026-10-15-idempotent-setup-script.md`, `.ai/runs/2026-10-15-idempotent-setup-script.md`, `packages/config/src/setup/setup.mjs`
+- **Related:** `.ai/specs/implemented/2026-10-15-idempotent-setup-script.md`, `.ai/runs/2026-10-15-idempotent-setup-script.md`, `packages/config/src/setup/setup.mjs`
 
 ## Context
 The first version of `npm run setup` checked for a running dev server by probing `http://localhost:${PORT || 3000}`. Code review caught that this could report a healthy server as a stale lock.

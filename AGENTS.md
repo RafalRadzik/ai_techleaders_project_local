@@ -1,380 +1,285 @@
 # AGENTS.md
 
-Instructions for AI coding agents (Claude Code, Codex, GitHub Copilot, Cursor, etc.) working in the **DevMentor** monorepo. `CLAUDE.md` imports this file, so this file is the single source of truth for the whole repository. `packages/app/AGENTS.md` adds Next.js-specific rules for the app package. Read it too before touching `packages/app`.
-
-**Precedence:** the user's explicit instructions in the current session > this file (and the nested `AGENTS.md` of the package you work in) > `.ai/lessons.md` > your own defaults. If two of these conflict, follow the higher one and say that there was a conflict.
+Instructions for any AI agent (Claude Code, other CLIs, autonomous runs) working in
+this repository.
 
 ## Project
 
-DevMentor is a Next.js application organised as an **npm-workspaces monorepo**.
+**DevMentor** — a platform connecting developers with mentors. It is an npm-workspaces
+monorepo built on the latest Next.js + TypeScript + React.
 
-| Concern | Choice |
-| --- | --- |
-| Framework | Next.js 16.4 (App Router, Turbopack, Cache Components), React 19.3 |
-| Language | TypeScript 5, `strict` + `noUncheckedIndexedAccess` |
-| Database | PostgreSQL 18 (local: `docker-compose.yml`) |
-| ORM | MikroORM 7 (`@mikro-orm/postgresql`): migrations, pooled connections, `defineEntity` (no decorators) |
-| Dependency injection | Awilix 13 (`InjectionMode.PROXY`, `strict: true`) |
-| Public (frontend) pages | Tailwind CSS 4 utility classes |
-| Admin (backend) pages | shadcn-ui (`base-nova` style, Base UI primitives) from `@devmentor/ui`, on Tailwind 4 |
-| Validation | Zod 4: one schema per input in `@devmentor/core/validators`, used by route handlers and forms |
-| Lint | ESLint 9 flat config, shared presets in `@devmentor/config` |
-| Unit tests | Vitest 5 + V8 coverage (100% enforced), Testing Library + jsdom for React |
-| Integration tests | Testcontainers (PostgreSQL 18) + `agent-browser` against the production build |
-| CI | GitHub Actions (`.github/workflows/ci.yml`): lint, type-check, build, unit, integration on every PR |
-| Package manager | npm workspaces. One root `package-lock.json`. Don't add yarn, pnpm, bun or Turborepo. |
+### Tech stack
 
-```
-.
-├── packages/
-│   ├── app/      @devmentor/app     Next.js app: routes, pages, route handlers; the ONLY DI composition root
-│   ├── core/     @devmentor/core    domain models, services, ports (interfaces); framework-, ORM- and DI-free
-│   ├── db/       @devmentor/db      MikroORM config, entities, repository/port adapters, migrations
-│   ├── ui/       @devmentor/ui      shadcn-ui components + theme (admin pages only)
-│   ├── shared/   @devmentor/shared  framework-free utilities and types (env helpers, errors, ...)
-│   ├── config/   @devmentor/config  tsconfig presets, ESLint presets, `with-root-env` script
-│   └── integration/ @devmentor/integration  browser integration tests (Testcontainers + agent-browser)
-├── .github/workflows/ci.yml         pull-request CI
-├── vitest.config.mts                unit-test projects + 100% coverage thresholds
-├── .ai/                             AI metadata: specs, run logs, lessons (see below)
-├── docker-compose.yml               local PostgreSQL
-├── .env.example                     template for the single root `.env`
-└── package.json                     workspace root + proxy scripts
-```
+| Concern            | Choice                                             |
+| ------------------ | -------------------------------------------------- |
+| Framework          | Next.js 16 (App Router, Turbopack) + React 19      |
+| Language           | TypeScript 5 (strict), ESM everywhere              |
+| Database           | PostgreSQL                                          |
+| ORM                | MikroORM v7 (PostgreSQL driver) — migrations + pool |
+| Dependency injection | awilix v13 (`PROXY` mode, typed `Cradle`)        |
+| Config validation  | zod                                                |
+| Logging            | pino                                               |
+| Frontend styling   | Tailwind CSS v4 (public/marketing pages)           |
+| Backend/admin UI   | shadcn-ui components (in `@devmentor/ui`)          |
+| Package manager    | npm workspaces (Node ≥ 24)                          |
 
-## Commands
+### Monorepo layout
 
-Run everything from the repository root.
-
-| Purpose | Command |
-| --- | --- |
-| Idempotent first-time setup (`.env`, install, DB, migrations, dev server) | `npm run setup` |
-| Install dependencies (all workspaces) | `npm install` |
-| Start local PostgreSQL / stop it | `npm run db:up` / `npm run db:down` |
-| Apply migrations | `npm run db:migrate` |
-| Create a migration from entity changes | `npm run db:migration:create` (first one: `-- --initial`) |
-| List migrations / roll back one | `npm run db:migration:list` / `npm run db:migrate:down` |
-| Dev server (http://localhost:3000) | `npm run dev` |
-| Lint (all workspaces) | `npm run lint` |
-| Type-check (all workspaces, incl. `next typegen`) | `npm run typecheck` |
-| Unit tests (once / watch) | `npm test` / `npm run test:watch` |
-| Unit tests with the 100% coverage gate | `npm run test:coverage` |
-| Integration tests (needs Docker; Chrome via `npx agent-browser install` once) | `npm run test:integration` |
-| Production build / start | `npm run build` / `npm run start` |
-| Add a dependency to one package | `npm install <pkg> -w @devmentor/<name>` |
-| Add a shadcn component | `cd packages/app && npx shadcn@latest add <component>` |
-
-- Never say tests pass unless you ran them in this session. Report the exact commands you ran.
-- `vitest run --project <name> --coverage` reports no files with the root config. Run coverage for the whole repo.
-- Before starting `npm run dev`, check `packages/app/.next/dev/lock`. If a dev server is already running, use it instead of starting another one.
-- With the dev server running, `/_next/mcp` (tool `get_errors`) reports browser and server errors.
-- First-time setup: `npm run setup` (safe to re-run; skips completed steps). Manual equivalent: `cp .env.example .env && npm install && npm run db:up && npm run db:migrate && npm run dev`.
-
-## Architecture rules
-
-### Dependency rules (lint-enforced)
+Everything lives under `packages/*`. The dependency graph is strictly one-way:
 
 ```
-shared  <-  core  <-  db  <-  app
-shared  <-  ui  <-----------  app
+app ──> core ──> db
+ └────> ui
+
+packages/
+  app    @devmentor/app    Next.js host + composition root (the only package that
+                           may import every other package)
+  core   @devmentor/core   config (zod), logger (pino), awilix container, domain
+                           services. Knows about db; never imports react/next/ui.
+  db     @devmentor/db     MikroORM config, entities, migrations, seeders. The leaf —
+                           the only package that imports @mikro-orm/*. Knows nothing
+                           about the others.
+  ui     @devmentor/ui     shadcn-ui primitives + Tailwind design tokens.
+                           Presentational only — no core/db imports.
 ```
 
-- `shared`: no workspace dependencies, no framework, ORM or DI imports.
-- `core`: may import only `@devmentor/shared`. No `next`, `react`, `awilix` or `@mikro-orm/*`. Business logic and **ports** (interfaces such as `UserRepository` and `HealthIndicator`) live here.
-- `db`: implements `core` ports with MikroORM. No `next`, `react`, `awilix`, `@devmentor/app` or `@devmentor/ui`.
-- `ui`: presentational React + shadcn only. No data access, no `core`, `db` or `app`.
-- `app`: integrates everything and is the only package that imports `awilix`.
-- `integration`: tests the running app through the browser only. It imports no workspace package.
-- The rules live in `packages/config/eslint/boundaries.mjs`. Never disable them. If a rule blocks you, the code is in the wrong package.
-
-### Workspace packages
-
-- Packages are consumed **as TypeScript source**: `package.json#exports` points at `src/**/*.ts(x)`. There is no build step, and Turbopack transpiles workspace packages automatically.
-- Import other packages only through their public entry points (`@devmentor/core`, `@devmentor/db`, `@devmentor/ui/components/button`, ...). Never use relative paths across packages (`../../core/src/...`).
-- Every package has `lint` and `typecheck` scripts, a `tsconfig.json` extending `@devmentor/config/tsconfig/*`, and an `eslint.config.mjs` built from `@devmentor/config/eslint/*`.
-- New package: create `packages/<name>` with `"name": "@devmentor/<name>"` and the same scripts and presets. Add its boundary rule to `boundaries.mjs`, then document it here and in `README.md`. Adding a package needs a spec.
-- Declare every dependency in the `package.json` of the package that imports it (not only at the root). Shared tooling (`eslint`, `typescript`, `@types/node`) lives in the root `devDependencies`.
+These boundaries are enforced by ESLint (`no-restricted-imports` in
+`eslint.config.mjs`); a cycle-introducing import fails `npm run lint`.
 
 ### Domain concept convention
 
-Domain code is not organised into `modules/`. Each concept (`users`, later `auth`, `mentors`, `availability`, `bookings`, `payments`, `messages`, `favorites`, `reviews`, ...) is a same-named sub-folder repeated across the layers that need it:
+Domain code is not organized into `modules/`. Each concept (`auth`, `mentors`,
+`availability`, `bookings`, `payments`, `messages`, `favorites`, `reviews`, ...) is a
+same-named sub-folder repeated across the layers that need it:
 
-| Layer | Path | Example |
-| --- | --- | --- |
-| Domain type + service | `packages/core/src/services/<concept>/<name>.service.ts` (type in `<name>.ts`) | `services/users/user.service.ts` → `UserService` |
-| Port (interface) | `packages/core/src/services/<concept>/<name>.port.ts` | `user-repository.port.ts` → `UserRepository` |
-| Shared Zod schema | `packages/core/src/validators/<concept>/<name>-<action>.schema.ts`, re-exported from `validators/index.ts` | `userCreateSchema` |
-| Entity | `packages/db/src/entities/<concept>/<name>.entity.ts`, registered in `entities/index.ts` | `entities/users/user.entity.ts` |
-| Repository (port adapter) | `packages/db/src/repositories/<concept>/<name>.repository.ts`; maps entities to plain domain objects | `MikroOrmUserRepository` |
-| HTTP | `packages/app/app/api/<concept>/route.ts`, item routes in `api/<concept>/[id]/route.ts` | `api/users/route.ts` |
-| Concept UI component | `packages/ui/src/components/<concept>/` | — |
+- `packages/db/src/entities/<concept>/<name>.entity.ts`
+- `packages/core/src/services/<concept>/<name>.service.ts`
+- `packages/core/src/validators/<concept>/` (shared Zod schemas, when needed)
+- `packages/app/src/app/api/<concept>/route.ts` and the matching `page.tsx` under
+  the relevant persona route group
 
-- Create a concept folder only when its first file is added. Never scaffold empty ones, and never add a per-concept setup/ACL file or auto-discovery.
-- Every new service or repository is one explicit line in `container.ts` (and its `Cradle` entry). No `loadModules`.
-- Domain errors are the `@devmentor/shared` classes (`NotFoundError`, `ForbiddenError`, `UnauthorizedError`, `ValidationError`, `ConflictError`, base `AppError`). Services throw them and never build HTTP responses.
-- Domain events (`concept.entity.action`, e.g. `bookings.booking.created`) will use a typed in-process emitter in `packages/core/src/events`, added with the first feature that emits one. There is no queue.
-- External integrations (payments, notifications) are ports in `core` with a mock adapter first. Vendor SDKs never reach `core`.
-- Full naming table, principles and security requirements: `.ai/specs/implemented/2026-09-01-engineering-standards.md` (its "Reconciliation" table overrides the older sections).
+Create a concept folder only when its first file is added — never scaffold empty
+ones. This is a directory convention, not a module runtime: there is no per-concept
+setup/ACL/auto-discovery. See `.ai/specs/2026-09-01-engineering-standards.md` for the
+full naming table and the payments-port/event-emitter patterns.
+
+Event IDs follow `concept.entity.action` (e.g. `bookings.booking.created`) and are
+emitted through the typed emitter in `packages/core/src/events`, registered on the
+`Cradle` — this is in-process only; there is no queue/worker in this project.
 
 ### Reusable API & UI layer
 
-Every route and page reuses these instead of re-implementing fetch, validation or error handling:
+Every route and every page reuses two shared layers instead of re-implementing
+fetch/validation/auth/error-handling per feature:
 
-- `packages/app/server/http/` (server-only):
-  - `apiHandler.ts` wraps a route handler. It calls `connection()`, rejects state-changing requests without the `x-devmentor-client` header (CSRF), returns `{ ok: true, data }`, maps `AppError`s to `{ ok: false, error: { code, message, fieldErrors? } }` with the right status, and logs unexpected errors (generic `500`, nothing leaked).
-  - `makeCrudRoute.ts` turns a service name + shared schemas into `{ GET, POST, PUT, DELETE }` for plain CRUD: `export const { GET, POST } = makeCrudRoute({ service: "userService", list, create })`. Use `apiHandler` directly for workflows (booking, payment).
-  - `parseBody.ts` parses JSON through a schema. Services only ever get the parsed output (no mass assignment).
-  - Route handlers never write their own `try/catch` + `Response.json`. Exception: `/api/health`, a monitoring probe whose contract is the status code.
-- `packages/ui/src/backend/` (admin):
-  - `api/apiCall.ts`: `apiCall` / `apiCallOrThrow`, the only `fetch()` call site for `/api/*`.
-  - `forms/CrudForm.tsx`: schema-driven form (same schema as the route), server `fieldErrors`, Cmd/Ctrl+Enter submit, Escape cancel.
-  - `tables/DataTable.tsx`: column config, loading/empty/error states, pagination, row actions.
-  - `feedback/{LoadingMessage,ErrorMessage,EmptyState}.tsx`: the only loading/error/empty renderers.
-- The envelope types (`ApiResult`) and the client header constant live in `@devmentor/shared`, so `app` and `ui` share them.
-- Logging: resolve `logger` from the container (`createConsoleLogger` from `@devmentor/shared`, which redacts passwords, tokens, cookies and secrets). No `console.*` in server code.
-- Where a new reusable component goes:
-  1. shadcn primitive → `ui/src/components/ui/`, only via the shadcn CLI.
-  2. Generic panel pattern → `ui/src/backend/<category>/`.
-  3. Tied to one concept's domain shape → `ui/src/components/<concept>/`.
-  4. Used by one page → colocate it next to that `page.tsx` until a second page needs it (e.g. `admin/users/users-panel.tsx`).
-- Reference implementation to copy: `api/users/route.ts` + `(admin)/admin/users/`.
+- `packages/core/src/http/` — `errors.ts` (typed `AppError` hierarchy),
+  `apiHandler.ts` (wraps a route: catches `AppError`s, maps to status + JSON
+  envelope, logs unexpected failures), `makeCrudRoute.ts` (schema + service in,
+  `{ GET, POST, PUT, DELETE }` out, for plain CRUD resources), `auth.ts`
+  (`requireSession`, `requireRole`, ownership assertions).
+- `packages/ui/src/backend/` — `api/apiCall.ts` (the only sanctioned `fetch()` call
+  site), `forms/CrudForm.tsx`, `tables/DataTable.tsx`,
+  `feedback/{LoadingMessage,ErrorMessage,EmptyState}.tsx`.
 
-### Dependency injection (Awilix)
+New reusable components have one designated home each — never scattered ad hoc:
 
-- The composition root is `packages/app/server/container.ts`. It is `server-only` and is the only place that registers dependencies. Add each registration to the `Cradle` interface first.
-- Services are plain classes or factories that take **one dependencies object**: `constructor({ userRepository }: Deps)` (PROXY injection mode). Never import the container from services, and never use the service-locator pattern outside `app`.
-- Lifetimes:
-  - `singleton`: process-wide resources, e.g. `orm`, which owns the connection pool, and the stateless `logger`.
-  - `scoped`: everything that touches the `EntityManager`, plus services.
-  - Strict mode rejects a singleton that depends on something scoped.
-- Use `getRequestContainer()` to get the request scope. In Server Components it is memoised per request with React `cache`. In Route Handlers and Server Actions, call it once and reuse the result (`apiHandler` does this and passes `container` to your handler).
+1. Shadcn primitive → `ui/src/components/ui/` (via `npx shadcn@latest add`, never
+   hand-written).
+2. Generic, concept-agnostic panel pattern → `ui/src/backend/<category>/`.
+3. Component tied to one concept's domain shape → `ui/src/components/<concept>/`,
+   named after the same concept folder used in `db`/`core`.
+4. Used by exactly one page → colocate next to that `page.tsx` until a second
+   consumer appears.
 
-### Database (MikroORM + PostgreSQL)
+The API envelope (`{ ok, data }` / `{ ok, error }`) is a *shape convention*, not a
+shared type: `core/src/http` and `ui/src/backend/api` each declare their own matching
+type because `ui` must not import `core`. `/api/users` + `/admin/users/page.tsx` are
+the reference example every new concept copies. See
+`.ai/specs/2026-09-01-engineering-standards.md` for the full rationale.
 
-- Configuration lives in `packages/db/src/config.ts` (`createOrmConfig`). Connection and pool settings come from env: `DATABASE_URL`, `DATABASE_POOL_MIN`, `DATABASE_POOL_MAX`, `DATABASE_POOL_IDLE_TIMEOUT_MS`.
-- The CLI config is `packages/db/src/mikro-orm.config.ts`. It adds the `Migrator`, uses the `tsx` loader, and keeps migrations in `packages/db/src/migrations`.
-- `getOrm()` returns one `MikroORM` instance per process, cached on `globalThis` so HMR doesn't leak pools. **Never use the global `orm.em` in request code.** Always use the request-scoped forked `em` from the container.
-- Entities:
-  - Use `defineEntity` + `p` and the class pattern (`class XEntity extends XSchema.class {}` + `setClass`). No decorators, no `reflect-metadata`.
-  - Register every entity in the process-wide registry in `packages/db/src/entities/index.ts` and import entity classes only from there. Folder-based discovery is not used. Next.js bundles a copy of `@devmentor/db` into every route and page while `getOrm()` shares one ORM, so class identity must come from the registry (lesson `2026-10-13-mikro-orm-entity-identity-across-bundles`).
-- Every schema change ships as a migration:
-  1. Change the entity.
-  2. Run `npm run db:migration:create`.
-  3. Review the generated SQL.
-  4. Run `npm run db:migrate`.
-  5. Commit the migration together with `.snapshot-*.json`.
-  - Never edit a migration that has been applied or committed; add a new one. Never use `schema:update` against shared databases.
-- `core` defines domain types and repository interfaces. `db` repositories implement them and may return entities only where they structurally satisfy the domain type.
+### Scripts (run from the repo root)
 
-### UI: frontend vs admin
+- `npm run dev` — start the Next.js app (`@devmentor/app`).
+- `npm run build` / `npm run start` — production build / serve (force `NODE_ENV=production`).
+- `npm run typecheck` — `tsc --noEmit` across all packages.
+- `npm run lint` — ESLint (includes the dependency-direction rules).
+- `npm run test:unit` — run TypeScript unit tests with Vitest.
+- `npm run test:unit:coverage` — run unit tests and enforce per-file 100% coverage.
+- `npm run test:integration` — create ephemeral PostgreSQL with Testcontainers,
+  build/start the app, and run the agent-browser scenarios.
+- `npm run test:browser:install` — install agent-browser's Chrome runtime locally
+  (use `test:browser:install:ci` on Linux CI to install system dependencies too).
+- `npm run db:up` / `npm run db:down` — local Postgres via `docker-compose.yml`.
+- `npm run db:migration:create -- --name <x>` — generate a migration from entity diff.
+- `npm run db:migrate` / `npm run db:migrate:down` — apply / revert migrations.
+- `npm run db:seed` — run the default seeder.
 
-- `packages/app/app` uses **two root layouts** (route groups):
-  - `(frontend)/` holds the public pages. They use Tailwind utility classes and `(frontend)/globals.css` only. Don't import `@devmentor/ui` here.
-  - `(admin)/admin/` holds the backend pages under `/admin`. They use shadcn-ui components from `@devmentor/ui` and `(admin)/admin.css`, which imports the shadcn theme.
-  - Navigating between the two areas is a full page load (separate root layouts). That is intended.
-- shadcn primitives live in `packages/ui/src/components/ui` (import `@devmentor/ui/components/ui/<name>`) and are added with the shadcn CLI from `packages/app` (both packages have a `components.json`). Customise them in place. Theme tokens are in `packages/ui/src/styles/globals.css`.
-- Panel building blocks are imported as `@devmentor/ui/backend/<category>/<File>` (e.g. `@devmentor/ui/backend/forms/CrudForm`).
-- Tailwind 4 is configured in CSS (`@import "tailwindcss"`, `@theme`, `@source`). There is no `tailwind.config.*`.
+### Configuration
 
-### Environment variables
+- Copy `.env.example` to `.env`. `.env` is git-ignored; defaults match
+  `docker-compose.yml` (`devmentor` / `devmentor` / `devmentor`).
+- All env access funnels through zod schemas — `@devmentor/core` (`config/env.ts`) for
+  the app, `@devmentor/db` (`env.ts`) for the MikroORM CLI. **Nothing else reads
+  `process.env` directly.**
 
-- The single source of env vars is the root `.env` (git-ignored; template: `.env.example`). Docker compose, Next.js and the MikroORM CLI all read it.
-- Package scripts that need env vars run through `with-root-env` (bin of `@devmentor/config`). Don't load env files from `next.config.ts`: Next.js resets `process.env` to its start-up snapshot, so the variables are lost.
-- Read env vars in server code only, through `requiredEnv` / `integerEnv` from `@devmentor/shared`. Client code may read only `NEXT_PUBLIC_*` vars.
-- Add every new variable to `.env.example` (no real secrets) and to the README env table.
+### Conventions & gotchas (learned the hard way — see `.ai/lessons.md`)
 
-## Testing (mandatory)
+- **Packages ship TypeScript source**, not built JS. They are consumed via `exports`
+  → `./src/*` and compiled by Next's `transpilePackages`. There is no per-package
+  build step.
+- **Use extensionless relative imports** inside packages (`./foo`, not `./foo.js`).
+  Turbopack does not rewrite `.js`→`.ts` the way `tsc` does; extensionless works for
+  `tsc` (bundler), Turbopack, and `tsx` alike.
+- **MikroORM v7 has no decorators** in `@mikro-orm/core`. Define entities with
+  `defineEntity` + the `p` (`defineEntity.properties`) builders. For cross-entity
+  relations use a **per-property thunk** (`user: () => p.oneToOne(User)...`) so the
+  reference resolves lazily at discovery time (avoids circular-import + wrapping bugs).
+- **Entities are registered as `globalThis` singletons** (`entities/define.ts`) so the
+  same schema object is shared across Next's RSC/SSR/route module graphs. Without this,
+  queries pass a different schema instance than was discovered and `populate` breaks.
+- **`MikroORM.init()` does not connect in v7** — `getOrm()` calls `orm.connect()`
+  explicitly and does not cache a failed connection (so the app recovers if the DB
+  comes back). The ORM and awilix container are cached on `globalThis` to survive HMR.
+- **`em.persistAndFlush()` was removed** — use `em.persist(e); await em.flush()`.
+- Touch the DB only in **dynamic** routes (`export const dynamic = "force-dynamic"`)
+  and degrade gracefully; the app must build and boot with no database reachable.
+- **Public pages use Tailwind utilities; `/admin/*` pages use shadcn-ui components**
+  from `@devmentor/ui`. Add shadcn components with `npx shadcn@latest add <c>` run in
+  `packages/ui` (its `components.json` is committed).
+- Request-scoped work goes through `withScope(fn)` from `@devmentor/core`, which opens
+  an awilix scope with a forked `EntityManager` and disposes it afterward.
+- **Never hand-roll fetch / validation / error-handling / CRUD.** Server routes use
+  `makeCrudRoute`/`apiHandler` (no bare `try/catch` + `NextResponse.json`); services
+  throw the typed `AppError`s and return DTOs, never build responses. Client pages
+  fetch through `apiCall`/`apiCallOrThrow` (never raw `fetch`), forms use `CrudForm`,
+  lists use `DataTable`, and loading/error/empty states use the `feedback/` components.
+- **Collection routes are non-dynamic**, so Next passes no `params` — CRUD helpers
+  guard `ctx.params` before reading it.
 
-- **Every new feature or change ships with unit tests that keep coverage at 100%** (lines, branches, functions and statements). `npm run test:coverage` enforces it locally and in CI. A PR that lowers coverage fails.
-- Unit tests:
-  - Put them next to the code as `<file>.test.ts(x)`.
-  - Use Vitest. Use Testing Library for React (`environment: jsdom`) and add `// @vitest-environment node` to server-only tests.
-  - Mock ports, the `EntityManager`, `next/server`, `next/font` and the DI container. Never use a real database, the network or a browser.
-  - Test async Server Components by awaiting the component function and rendering its result.
-  - Shared test-only helpers are named `*.test-utils.ts(x)` and are excluded from coverage.
-- The coverage exclusions in `vitest.config.mts` cover only generated code (MikroORM migrations, shadcn CLI primitives), type declarations, test files and config files. Don't add hand-written code to them. Don't use `/* v8 ignore */` comments and don't lower the thresholds. If code can't be tested, change its design.
-- User-facing flows (new pages, forms and API workflows) also need integration tests in `packages/integration/src/*.test.ts`. They use the `Browser` helper (`agent-browser`) against the production build and an ephemeral PostgreSQL. They talk to the app only through the browser. Wait for streamed content (`waitForText`) before you interact with it. Every test asserts that the page logged no errors.
-- Any package with source code gets a `vitest.config.ts` (or `.mts` if its `package.json` has no `"type": "module"`), a `test` script and an entry in the root `vitest.config.mts` projects and coverage `include`.
+## Testing requirements
 
-## Next.js 16 conventions (summary)
+- **Every new feature must have unit tests covering 100% of its new or changed
+  production behavior:** statements, branches, functions, and lines, per file. A
+  feature is not complete and its spec must not move to `implemented/` until
+  `npm run test:unit:coverage` proves all four metrics are 100%.
+- Add each new or changed production file to `coverage.include` in
+  `vitest.config.mts` in the same change. Coverage that only measures files imported
+  by tests is bypassable and does not satisfy this rule. Do not narrow exclusions or
+  remove a file from the coverage scope to make the gate pass.
+- Unit tests live next to their source as `*.test.ts` / `*.test.tsx`. Test every
+  success, error, validation, authorization, and edge-case branch. Every bug fix
+  requires a regression test that fails without the fix.
+- Integration/browser tests **supplement but never replace unit tests** or the 100%
+  unit-coverage requirement. Add integration coverage whenever behavior crosses the
+  app/database/API/browser boundary.
+- Integration tests must own their data and infrastructure. Use Testcontainers with
+  random ports, apply migrations, create/seed prerequisites, and clean up browser
+  sessions, app processes, and containers on success and failure. Never depend on the
+  developer database, fixed ports, or shared/demo state.
+- Use the pinned local `agent-browser` executable for browser scenarios. Observe the
+  live accessibility tree first, assert semantic roles/text rather than guessed CSS,
+  capture screenshots at key assertions, and close each isolated session in
+  `finally`.
+- The integration harness under `tests/integration/` is the sole exception to the
+  direct-environment-access rule: `environment.ts` may inherit the parent process
+  environment only to pass ephemeral test configuration to migration/build/app child
+  processes. Application and package source must still use the zod config modules.
 
-The full, version-matched rules are in `packages/app/AGENTS.md`. Docs live in `node_modules/next/dist/docs/` at the repo root (npm hoists `next`). Key points:
+GitHub Actions runs Build, Lint, Unit tests, and Integration tests independently on
+every pull request. A workflow result becomes merge-blocking only when the repository
+ruleset requires those four exact check names.
 
-- Server Components are the default. Add `"use client"` only to the smallest component that needs it.
-- Cache Components is on:
-  - Wrap request-time data and DB access in `<Suspense>` and call `await connection()` before uncached DB reads.
-  - Alternatively, cache with `"use cache"` + `cacheLife` / `cacheTag`.
-  - `dynamic`, `revalidate` and `fetchCache` segment options are not available.
-- Request APIs are async (`await params`, `await cookies()`, ...). Type routes with `PageProps<'/route'>`, `LayoutProps<'/route'>` and `RouteContext<'/route'>`. Both root layouts use `LayoutProps<'/'>`.
-- Middleware is called `proxy.ts`. Use `next/image`, `next/link` and `next/font`. Inside `packages/app`, use the `@/` alias (root of `packages/app`).
+## Spec-Driven Development (SDD)
 
-## `.ai/` metadata (mandatory)
-
-All AI working metadata lives in `.ai/`. Every agent MUST use it as described here.
+Nontrivial work in this repo is defined by a spec before it's implemented. All SDD
+artifacts live under `.ai/`.
 
 ```
 .ai/
-├── specs/                      # Specifications for Spec-Driven Development (SDD)
-│   ├── YYYY-MM-DD-slug.md      # Active specs (draft, approved, in progress)
-│   ├── implemented/            # Specs whose implementation is complete and verified
-│   └── archive/                # Obsolete, rejected or superseded specs
-├── runs/                       # Logs of autonomous AI runs
-│   └── YYYY-MM-DD-slug.md
-├── lessons.md                  # Index of lessons learned (long-term memory) + lesson template
-└── lessons/                    # One file per lesson
-    └── YYYY-MM-DD-slug.md
+  specs/                  active specs
+    implemented/          specs whose implementation has landed
+    archive/               specs that were superseded or abandoned
+  runs/                   logs of autonomous AI runs
+  lessons.md              index of lessons learned
+  lessons/                detailed lesson write-ups
 ```
 
-### Naming convention
+### Specs — `.ai/specs/`
 
-Every file in `specs/`, `runs/` and `lessons/` is named `YYYY-MM-DD-slug.md`:
+- Naming: `YYYY-MM-DD-slug.md`, dated the day the spec was written, `slug` a short
+  kebab-case description (e.g. `2026-09-01-user-auth-refresh-tokens.md`).
+- Lifecycle:
+  1. New/active work: file lives directly in `.ai/specs/`.
+  2. Once the implementation is complete, verified, and merged: `git mv` the file into
+     `.ai/specs/implemented/`.
+  3. If a spec is superseded, abandoned, or no longer accurate: `git mv` it into
+     `.ai/specs/archive/` instead of deleting it.
+- Rules:
+  - Before starting a nontrivial feature or fix, check `.ai/specs/` and
+    `.ai/specs/implemented/` for a spec that already covers it.
+  - If none exists, write one first for anything beyond a small/obvious change.
+  - Never edit a spec after it has moved to `implemented/` or `archive/` — if
+    requirements change, write a new spec instead.
+  - A spec should cover: Problem/Goal, Non-goals, Approach, Acceptance criteria.
 
-- The date is the creation date in ISO 8601 format. It stays the same when the file is updated or moved.
-- `slug` is short, lowercase kebab-case and descriptive. Example: `2026-10-13-add-login-page.md`.
-- If the name is already taken, make the slug more specific. Never overwrite an existing file.
+### Runs — `.ai/runs/`
 
-### Specs (`.ai/specs/`)
+- Every autonomous AI run (an agent operating on a task without a human reviewing
+  each step — e.g. a workflow, an unattended long-running session) produces exactly
+  one run log.
+- Naming: `YYYY-MM-DD-slug.md`, dated the day the run happened.
+- A run log should cover: what was requested, what was done, files touched, outcome,
+  and any follow-ups left for a human or a future run.
 
-- **When a spec is required:** any non-trivial change. That means a new feature, a change in behavior, a new dependency, a change to data or a schema, or any work that needs design decisions or touches more than a few files. Trivial changes don't need a spec: typos, copy edits, small config tweaks, obvious one-line fixes.
-- **Lifecycle:** `Draft` → `Approved` → `In progress` → `Implemented` (moved to `implemented/`), or `Archived` (moved to `archive/`). Keep the `Status` field current.
-- If the user is available, get the draft approved before implementing it. In unattended runs, go ahead, but write your assumptions into the spec and the run log.
-- The spec is the source of truth. If the implementation has to differ from it, update the spec first and note what changed and why.
-- Before implementing a spec you didn't write in this session, check every path, package direction, API and dependency it names against this file and the code. Record conflicts and the decisions in the spec (a "Reconciliation" table) before writing code. See lesson `2026-10-13-reconcile-pre-drafted-specs`.
-- Move specs with `git mv` (plain `mv` if the file is untracked). Never delete a spec.
+### Lessons — `.ai/lessons.md` + `.ai/lessons/`
 
-Spec template:
+- `.ai/lessons.md` is a chronological index — one line per lesson, most recent first.
+  Short lessons can be stated inline; anything longer gets its own file in
+  `.ai/lessons/slug.md` and is linked from the index.
+- Add a lesson when:
+  - a nontrivial bug is fixed (what was wrong, why, the fix, how to avoid it again),
+  - a project-specific gotcha or convention is discovered,
+  - the user corrects an agent's approach in a way that should persist beyond the
+    current session.
+- Check `.ai/lessons.md` at the start of related work before repeating a known
+  mistake.
 
-```markdown
-# <Title>
+### Enforcement
 
-- **Status:** Draft | Approved | In progress | Implemented | Archived
-- **Created:** YYYY-MM-DD
-- **Runs:** links to related `.ai/runs/` logs
+- Use this `.ai/` structure for specs, run logs, and lessons — don't create ad hoc
+  scratch docs elsewhere in the repo for these purposes.
+- Keep the `YYYY-MM-DD-slug.md` naming convention exactly as specified above.
 
-## Goal
-The problem and the desired outcome in 1-3 sentences.
+## Working Rules
 
-## Scope
-In scope / out of scope.
+Distilled from [Boris Cherny's Claude Code
+tips](https://ykdojo.github.io/claude-code-tips/content/boris-claude-code-tips).
+These govern *how* you work; the SDD section above governs *what artifacts* you leave
+behind.
 
-## Requirements
-1. Numbered, testable requirements.
+1. **Plan first, and re-plan instead of patching.** Front-load the thinking: a
+   detailed spec beats an ambiguous prompt every time. When implementation goes
+   sideways, stop and revise the plan/spec rather than reactively troubleshooting on
+   top of a bad foundation. For high-stakes plans, get a second opinion — have a
+   subagent review the plan as a skeptical staff engineer before you write code.
 
-## Design notes
-Approach, affected routes and files, data flow, open questions.
+2. **Capture every correction the moment it happens.** When the user corrects your
+   approach, write the lesson to `.ai/lessons.md` (and update this file if it's a
+   standing rule) *before* continuing the task. Rules that only live in the current
+   conversation are lost; the point is that the same mistake never recurs.
 
-## Acceptance criteria
-- [ ] Checkable criteria used to verify the work.
-```
+3. **Promote anything repeated into a skill or command.** If you find yourself doing
+   the same multi-step task more than a couple of times, propose codifying it as a
+   project skill or slash command in `.claude/` instead of re-deriving the steps each
+   run.
 
-### Runs (`.ai/runs/`)
+4. **Don't ship the first draft — grill it.** Before declaring work done or moving a
+   spec to `implemented/`, check the diff against the spec's acceptance criteria and
+   actively try to break it. If the result is merely adequate, scrap it and implement
+   the elegant version rather than iterating on a mediocre base. Report failures
+   plainly; never self-report success you haven't verified.
 
-- A **run** is one task session in which an agent changes the repository. Every run MUST have a log. Q&A or read-only sessions don't need one.
-- Create the log when the run starts and update it while you work, not only at the end. That way an interrupted run can be picked up from the log.
-- Past run logs are history. Don't rewrite them. A follow-up run gets its own log that links to the earlier one.
-
-Run log template:
-
-```markdown
-# <Title>
-
-- **Date:** YYYY-MM-DD
-- **Agent:** <tool / model>
-- **Spec:** `.ai/specs/...` or n/a
-- **Status:** in progress | success | partial | failed
-
-## Goal
-## Plan
-## Log
-- Actions, decisions and assumptions, in order.
-## Changes
-- Files changed and why.
-## Verification
-- Commands run and their results.
-## Open issues / next steps
-## Lessons recorded
-```
-
-### Lessons (`.ai/lessons.md` + `.ai/lessons/`)
-
-- At the start of every task, read `.ai/lessons.md`, then open the lesson files that are relevant to the task.
-- **Add a lesson when:**
-  - you fix a bug (record the root cause and how to avoid it),
-  - the user corrects you,
-  - you hit a non-obvious pitfall or tooling quirk,
-  - you find a pattern worth reusing.
-- **How to add one:** create `.ai/lessons/YYYY-MM-DD-slug.md` from the template in `.ai/lessons.md`. Then add a one-line entry to the index, newest first.
-- If a lesson on the same topic already exists, update it instead of adding a duplicate.
-- If a lesson should apply to every task, also turn it into a rule in this file.
-- Never delete a lesson. Mark outdated ones `(obsolete)` and explain why.
-
-## Task workflow
-
-1. **Orient:** read `.ai/lessons.md`, look for an existing spec in `.ai/specs/`, and read the relevant code and Next.js docs.
-2. **Specify:** for non-trivial work, write or update the spec. If the user is available, ask them to approve it.
-3. **Log:** create the run log and write the plan in it.
-4. **Implement:** follow the spec in small, focused steps and keep the run log updated.
-5. **Verify:** run lint, type-check, build, `npm run test:coverage` (100%) and, for user-facing or DB changes, `npm run test:integration`. For UI changes, also check the page in the running app, including the browser console and the dev server output. Fix anything you broke.
-6. **Learn:** record lessons.
-7. **Close:** tick the acceptance criteria, set the spec's status and move it to `implemented/`, and set the final run log status. Then tell the user what changed, how you verified it and what is still open.
-
-## Working principles
-
-Adapted from [Boris Cherny's Claude Code tips](https://ykdojo.github.io/claude-code-tips/content/boris-claude-code-tips).
-
-1. **Plan first, re-plan when stuck.** Put most of your effort into the plan (the spec plus the run log plan) so the implementation can be done in one pass. If things go wrong, stop and re-plan. Don't keep pushing a broken approach.
-2. **Turn every correction into a rule.** When the user corrects you, or you fix your own mistake, record it right away as a lesson in `.ai/lessons/`. If it should apply every time, also add it to this file so the mistake isn't repeated.
-3. **Fix bugs on your own.** Given a bug report, failing check or failing CI, investigate (logs, stack traces, lint, build) and fix it end to end without asking how. Ask only when the requirements are truly ambiguous.
-4. **Prefer the elegant solution.** If a fix feels hacky, step back and ask: "knowing everything I know now, what is the clean solution?" Then replace the hack with it. Review your own diff critically before you call the work done.
-5. **Keep context clean and automate repetition.** Hand off searches, research and parallel work to subagents. If a task keeps coming up, suggest turning it into a reusable script, command or skill committed to the repo.
-
-## Definition of done
-
-- All acceptance criteria are met, or any deviation is documented in the spec and the run log.
-- `npm run lint`, the type-check and `npm run build` pass with no new warnings.
-- New and changed code is unit-tested and `npm run test:coverage` passes at 100%. User-facing flows have integration tests and `npm run test:integration` passes. The same jobs pass in CI.
-- UI changes have been checked in the running app.
-- There are no leftovers: no debug `console.log`, no commented-out code, no TODOs without context.
-- The spec, run log and lessons are updated, and a finished spec is in `implemented/`.
-
-## Boundaries
-
-**Always**
-
-- Make focused changes that stay within the task or spec. Don't refactor unrelated code.
-- Follow the existing code style, ESLint rules and TypeScript strict mode.
-- Read before you write. Understand the existing code and docs before you change them.
-
-**Ask first**
-
-- Adding, removing or upgrading dependencies.
-- Changing `next.config.ts`, any `tsconfig.json`, any `eslint.config.mjs`, any `vitest.config.*`, `@devmentor/config` presets, `docker-compose.yml`, or CI/deployment configuration (`.github/workflows/`).
-- Adding, removing or renaming a workspace package, or changing the dependency rules.
-- Deleting files, or refactoring beyond the scope of the spec.
-- Anything irreversible or that affects external systems: pushing, deploying, publishing, data migrations.
-
-**Never**
-
-- Commit secrets or `.env*` files, or write secrets, tokens or personal data into `.ai/` files.
-- Push, force-push or rewrite git history without explicit permission.
-- Silence problems to make checks pass, for example by disabling lint rules or using `@ts-ignore`, `any` or skipped verification. That includes skipped or `.only` tests, `v8 ignore` comments, new coverage exclusions for hand-written code and lowered coverage thresholds.
-- Delete specs, run logs or lessons.
-- Edit `node_modules/`, `.next/` or generated files such as `next-env.d.ts`.
-- Hand-edit the `<!-- BEGIN:nextjs-... -->` managed blocks in `packages/app/AGENTS.md`. `next dev` maintains them.
-- Bypass the package boundaries, e.g. with relative imports into another package's `src/`, or by importing `awilix` outside `app`.
-- Use the global `orm.em` in request code, or change the database schema without a migration.
-- Call `fetch()` for `/api/*` outside `apiCall`, write a hand-rolled `try/catch` + `Response.json` in an API route, or pass a raw request body to a service or `em.create()`/`em.assign()`.
-- Commit `.env`. Only `.env.example`, with placeholder values, is committed.
-
-## Git
-
-- Use Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `test:` (scope optional).
-- Commit only when the user asks or the task explicitly includes it. Make one logical change per commit.
-- Commit the `.ai/` updates (spec, run log, lessons) together with the code they describe. Also commit changes that `next dev` makes to `packages/app/AGENTS.md`.
-
-## Maintaining this file
-
-- Keep it short, specific and current. Every rule should prevent a real mistake.
-- When a correction or lesson should apply to every task, add it here and record why in a lesson.
-- Keep `CLAUDE.md` consistent with this file. It imports this file with `@AGENTS.md` and only adds short reminders. The same applies to `packages/app/CLAUDE.md` and `packages/app/AGENTS.md`.
-- When the stack, package layout or a convention changes, update this file and `README.md` in the same change.
+5. **Delegate breadth to subagents; keep the main context for judgment.** Push wide
+   searches, multi-file reads, and independent parallel work into subagents and keep
+   only their conclusions in the main thread. A clean context window is a
+   correctness feature, not just a cost saving.

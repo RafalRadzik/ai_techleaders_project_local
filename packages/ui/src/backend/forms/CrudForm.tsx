@@ -1,154 +1,223 @@
-"use client";
+'use client';
 
-import type { ApiResult, FieldErrors } from "@devmentor/shared";
-import { Button } from "@devmentor/ui/components/ui/button";
-import { Input } from "@devmentor/ui/components/ui/input";
-import { Label } from "@devmentor/ui/components/ui/label";
-import { useId, useState, type FormEvent, type KeyboardEvent } from "react";
-import { z } from "zod";
+import { useCallback, useState, type KeyboardEvent } from 'react';
+import type { z } from 'zod';
+import { Button } from '../../components/ui/button';
+import { cn } from '../../lib/utils';
+import { apiCall } from '../api/apiCall';
+import type { FieldErrors } from '../api/types';
 
-type FieldName<TSchema extends z.ZodObject> = Extract<keyof z.input<TSchema>, string>;
-export type CrudFormValues<TSchema extends z.ZodObject> = Partial<Record<FieldName<TSchema>, string>>;
+export type CrudFieldType = 'text' | 'email' | 'number' | 'textarea' | 'checkbox' | 'select';
 
-export interface CrudFormField<TName extends string = string> {
-  name: TName;
+export interface CrudField {
+  name: string;
   label: string;
-  type?: "text" | "email" | "number" | "password" | "url" | "tel";
+  type?: CrudFieldType;
   placeholder?: string;
-  autoComplete?: string;
-  description?: string;
+  /** Options for `select` fields. */
+  options?: { label: string; value: string }[];
 }
 
-interface CrudFormProps<TSchema extends z.ZodObject, TData> {
-  /** The same Zod schema the route handler validates with. */
-  schema: TSchema;
-  fields: readonly CrudFormField<FieldName<TSchema>>[];
-  initialValues?: CrudFormValues<TSchema>;
+export interface CrudFormProps<T> {
+  /** The same Zod schema used server-side — client validation reuses it (DRY). */
+  schema: z.ZodType<T>;
+  /** Field layout. The schema validates; these describe how to render each input. */
+  fields: CrudField[];
+  /** API path to submit to, called through `apiCall` (never a raw `fetch`). */
+  endpoint: string;
+  method?: 'POST' | 'PUT';
+  initialValues?: Record<string, unknown>;
   submitLabel?: string;
-  /** Usually an `apiCall`; server `fieldErrors` are shown next to their fields. */
-  onSubmit: (values: z.output<TSchema>) => Promise<ApiResult<TData>>;
-  onSuccess?: (data: TData) => void;
-  /** Renders a cancel button and enables `Escape`. */
+  onSuccess?: (data: unknown) => void;
   onCancel?: () => void;
 }
 
+function flattenZodError(error: z.ZodError): FieldErrors {
+  const fieldErrors: FieldErrors = {};
+  for (const issue of error.issues) {
+    const key = issue.path.length ? issue.path.map(String).join('.') : '_root';
+    (fieldErrors[key] ??= []).push(issue.message);
+  }
+  return fieldErrors;
+}
+
+function defaultValueFor(field: CrudField): unknown {
+  if (field.type === 'checkbox') return false;
+  if (field.type === 'number') return '';
+  return '';
+}
+
+const fieldClassName =
+  'w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
 /**
- * Schema-driven create/edit form. Validates on the client with the shared schema, then
- * submits. `Cmd/Ctrl+Enter` submits, `Escape` cancels. Resets to `initialValues` on success.
+ * Schema-driven create/edit form. Validates client-side with the same Zod schema the
+ * server uses, submits through `apiCall`, and shows server-returned `fieldErrors` next
+ * to the right field. `Cmd/Ctrl+Enter` submits, `Escape` cancels. Use for every
+ * create/edit screen; write a bespoke form only when the UX isn't form-over-schema.
  */
-export function CrudForm<TSchema extends z.ZodObject, TData>({
+export function CrudForm<T>({
   schema,
   fields,
-  initialValues = {},
-  submitLabel = "Save",
-  onSubmit,
+  endpoint,
+  method = 'POST',
+  initialValues,
+  submitLabel = 'Save',
   onSuccess,
   onCancel,
-}: CrudFormProps<TSchema, TData>) {
-  const idPrefix = useId();
-  const [values, setValues] = useState<CrudFormValues<TSchema>>(initialValues);
+}: CrudFormProps<T>) {
+  const [values, setValues] = useState<Record<string, unknown>>(() => {
+    const initial: Record<string, unknown> = {};
+    for (const field of fields) {
+      initial[field.name] = initialValues?.[field.name] ?? defaultValueFor(field);
+    }
+    return initial;
+  });
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [formError, setFormError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (isSubmitting) {
-      return;
+  const setValue = useCallback((name: string, value: unknown) => {
+    setValues((prev) => ({ ...prev, [name]: value }));
+  }, []);
+
+  const submit = useCallback(async () => {
+    setFormError(null);
+    // Coerce empty number inputs to undefined so the schema's own rules apply.
+    const candidate: Record<string, unknown> = {};
+    for (const field of fields) {
+      const raw = values[field.name];
+      candidate[field.name] =
+        field.type === 'number' && raw === '' ? undefined : raw;
     }
 
-    // Inputs are strings: untouched fields are validated as "" so the schema's own messages apply.
-    const parsed = schema.safeParse(Object.fromEntries(fields.map((field) => [field.name, values[field.name] ?? ""])));
+    const parsed = schema.safeParse(candidate);
     if (!parsed.success) {
-      setFieldErrors(toFieldErrors(z.flattenError(parsed.error).fieldErrors));
-      setFormError(null);
+      setFieldErrors(flattenZodError(parsed.error));
       return;
     }
+    setFieldErrors({});
+    setSubmitting(true);
+    const result = await apiCall(endpoint, { method, body: parsed.data });
+    setSubmitting(false);
 
-    setIsSubmitting(true);
-    try {
-      const result = await onSubmit(parsed.data);
-      if (!result.ok) {
-        setFieldErrors(result.error.fieldErrors ?? {});
-        setFormError(result.error.message);
-        return;
-      }
-      setValues(initialValues);
-      setFieldErrors({});
-      setFormError(null);
+    if (result.ok) {
       onSuccess?.(result.data);
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLFormElement>) {
-    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault();
-      event.currentTarget.requestSubmit();
       return;
     }
-    if (event.key === "Escape" && onCancel) {
-      event.preventDefault();
-      onCancel();
+    if (result.error.fieldErrors) {
+      setFieldErrors(result.error.fieldErrors);
+    } else {
+      setFormError(result.error.message);
     }
-  }
+  }, [endpoint, fields, method, onSuccess, schema, values]);
+
+  const onKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLFormElement>) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault();
+        void submit();
+      } else if (event.key === 'Escape' && onCancel) {
+        event.preventDefault();
+        onCancel();
+      }
+    },
+    [onCancel, submit],
+  );
 
   return (
-    <form noValidate onSubmit={handleSubmit} onKeyDown={handleKeyDown} className="flex flex-col gap-4">
+    <form
+      className="flex flex-col gap-4"
+      onKeyDown={onKeyDown}
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
       {fields.map((field) => {
-        const id = `${idPrefix}-${field.name}`;
-        const errors = fieldErrors[field.name] ?? [];
-        const hintId = `${id}-hint`;
-        const hasHint = errors.length > 0 || field.description !== undefined;
+        const errors = fieldErrors[field.name];
+        const value = values[field.name];
         return (
           <div key={field.name} className="flex flex-col gap-1.5">
-            <Label htmlFor={id}>{field.label}</Label>
-            <Input
-              id={id}
-              name={field.name}
-              type={field.type ?? "text"}
-              placeholder={field.placeholder}
-              autoComplete={field.autoComplete}
-              value={values[field.name] ?? ""}
-              onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))}
-              aria-invalid={errors.length > 0 || undefined}
-              aria-describedby={hasHint ? hintId : undefined}
-              disabled={isSubmitting}
-            />
-            {errors.length > 0 ? (
-              <p id={hintId} className="text-destructive text-xs">
-                {errors.join(" ")}
-              </p>
-            ) : field.description ? (
-              <p id={hintId} className="text-muted-foreground text-xs">
-                {field.description}
-              </p>
-            ) : null}
+            <label htmlFor={field.name} className="text-sm font-medium">
+              {field.label}
+            </label>
+
+            {field.type === 'textarea' ? (
+              <textarea
+                id={field.name}
+                className={cn(fieldClassName, 'min-h-24')}
+                placeholder={field.placeholder}
+                value={String(value ?? '')}
+                onChange={(event) => setValue(field.name, event.target.value)}
+              />
+            ) : field.type === 'checkbox' ? (
+              <input
+                id={field.name}
+                type="checkbox"
+                className="size-4"
+                checked={Boolean(value)}
+                onChange={(event) => setValue(field.name, event.target.checked)}
+              />
+            ) : field.type === 'select' ? (
+              <select
+                id={field.name}
+                className={fieldClassName}
+                value={String(value ?? '')}
+                onChange={(event) => setValue(field.name, event.target.value)}
+              >
+                <option value="" disabled>
+                  {field.placeholder ?? 'Select…'}
+                </option>
+                {field.options?.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                id={field.name}
+                type={field.type === 'number' ? 'number' : field.type ?? 'text'}
+                className={fieldClassName}
+                placeholder={field.placeholder}
+                value={String(value ?? '')}
+                onChange={(event) =>
+                  setValue(
+                    field.name,
+                    field.type === 'number'
+                      ? event.target.value === ''
+                        ? ''
+                        : Number(event.target.value)
+                      : event.target.value,
+                  )
+                }
+              />
+            )}
+
+            {errors?.length
+              ? errors.map((message) => (
+                  <p key={message} className="text-xs text-destructive">
+                    {message}
+                  </p>
+                ))
+              : null}
           </div>
         );
       })}
-      {formError ? (
-        <p role="alert" className="text-destructive text-sm">
-          {formError}
-        </p>
-      ) : null}
+
+      {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
+
       <div className="flex items-center gap-2">
-        <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? "Saving…" : submitLabel}
+        <Button type="submit" disabled={submitting}>
+          {submitting ? 'Saving…' : submitLabel}
         </Button>
         {onCancel ? (
-          <Button type="button" variant="ghost" onClick={onCancel} disabled={isSubmitting}>
+          <Button type="button" variant="ghost" onClick={onCancel} disabled={submitting}>
             Cancel
           </Button>
         ) : null}
       </div>
     </form>
-  );
-}
-
-function toFieldErrors(errors: Partial<Record<string, string[]>>): FieldErrors {
-  return Object.fromEntries(
-    Object.entries(errors).filter((entry): entry is [string, string[]] => entry[1] !== undefined),
   );
 }

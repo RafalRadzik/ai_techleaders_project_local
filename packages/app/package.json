@@ -2,36 +2,24 @@
   "name": "@devmentor/app",
   "version": "0.1.0",
   "private": true,
-  "description": "DevMentor Next.js application: the integration package and DI composition root.",
+  "description": "DevMentor — Next.js host and composition root",
   "scripts": {
-    "dev": "with-root-env next dev",
-    "build": "with-root-env next build",
-    "start": "with-root-env next start",
-    "lint": "eslint",
-    "typecheck": "next typegen && tsc --noEmit",
-    "test": "vitest run"
+    "dev": "next dev",
+    "build": "NODE_ENV=production next build",
+    "start": "NODE_ENV=production next start"
   },
   "dependencies": {
     "@devmentor/core": "*",
     "@devmentor/db": "*",
-    "@devmentor/shared": "*",
     "@devmentor/ui": "*",
-    "awilix": "^13.0.5",
-    "next": "16.4.0",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "server-only": "^0.0.1",
-    "zod": "^4.6.7"
+    "next": "16.3.3",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@devmentor/config": "*",
-    "@tailwindcss/turbopack": "^4",
-    "@testing-library/jest-dom": "^7.0.1",
-    "@testing-library/react": "^16.3.3",
-    "@testing-library/user-event": "^14.6.8",
+    "@tailwindcss/postcss": "^4",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "jsdom": "^30.1.2",
     "tailwindcss": "^4"
   }
 }

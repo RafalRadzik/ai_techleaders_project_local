@@ -1,104 +1,113 @@
-"use client";
+'use client';
 
-import { EmptyState } from "@devmentor/ui/backend/feedback/EmptyState";
-import { ErrorMessage } from "@devmentor/ui/backend/feedback/ErrorMessage";
-import { LoadingMessage } from "@devmentor/ui/backend/feedback/LoadingMessage";
-import { Button } from "@devmentor/ui/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@devmentor/ui/components/ui/table";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from 'react';
+import { cn } from '../../lib/utils';
+import { Button } from '../../components/ui/button';
+import { LoadingMessage } from '../feedback/LoadingMessage';
+import { ErrorMessage } from '../feedback/ErrorMessage';
+import { EmptyState } from '../feedback/EmptyState';
 
-const DEFAULT_PAGE_SIZE = 10;
-
-export interface DataTableColumn<TRow> {
-  id: string;
-  header: ReactNode;
-  cell: (row: TRow) => ReactNode;
+export interface Column<Row> {
+  /** Property key on the row; also the default cell value when `render` is omitted. */
+  key: string;
+  header: string;
+  render?: (row: Row) => ReactNode;
   className?: string;
 }
 
-interface DataTableProps<TRow> {
-  columns: readonly DataTableColumn<TRow>[];
-  /** `undefined` while the first load is in flight. */
-  rows: readonly TRow[] | undefined;
-  getRowId: (row: TRow) => string;
-  isLoading?: boolean;
-  error?: string | null;
-  onRetry?: () => void;
-  emptyTitle?: string;
-  emptyDescription?: string;
-  pageSize?: number;
-  rowActions?: (row: TRow) => ReactNode;
+export interface DataTablePagination {
+  page: number;
+  pageCount: number;
+  onPageChange: (page: number) => void;
 }
 
-/** Column-config-driven list with loading, error and empty states and client-side pagination. */
-export function DataTable<TRow>({
+export interface DataTableProps<Row> {
+  columns: Column<Row>[];
+  rows: Row[] | undefined;
+  getRowId: (row: Row) => string;
+  loading?: boolean;
+  error?: string | null;
+  emptyMessage?: string;
+  rowActions?: (row: Row) => ReactNode;
+  pagination?: DataTablePagination;
+}
+
+/**
+ * Column-config-driven list with built-in loading/error/empty states and optional
+ * pagination + row actions. Use for every list screen instead of a hand-rolled
+ * `<table>` + `.map()`.
+ */
+export function DataTable<Row>({
   columns,
   rows,
   getRowId,
-  isLoading = false,
+  loading = false,
   error = null,
-  onRetry,
-  emptyTitle = "Nothing here yet",
-  emptyDescription,
-  pageSize = DEFAULT_PAGE_SIZE,
+  emptyMessage = 'Nothing here yet.',
   rowActions,
-}: DataTableProps<TRow>) {
-  const [page, setPage] = useState(0);
-
-  if (error) {
-    return <ErrorMessage message={error} onRetry={onRetry} />;
-  }
-  if (rows === undefined || (isLoading && rows.length === 0)) {
+  pagination,
+}: DataTableProps<Row>) {
+  if (loading) {
     return <LoadingMessage />;
   }
-  if (rows.length === 0) {
-    return <EmptyState title={emptyTitle} description={emptyDescription} />;
+  if (error) {
+    return <ErrorMessage message={error} />;
+  }
+  if (!rows || rows.length === 0) {
+    return <EmptyState title={emptyMessage} />;
   }
 
-  const pageCount = Math.ceil(rows.length / pageSize);
-  // Clamp instead of syncing state: the row count can shrink after a reload.
-  const currentPage = Math.min(page, pageCount - 1);
-  const visibleRows = rows.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
-
   return (
-    <div className="flex flex-col gap-3" aria-busy={isLoading}>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            {columns.map((column) => (
-              <TableHead key={column.id} className={column.className}>
-                {column.header}
-              </TableHead>
-            ))}
-            {rowActions ? <TableHead className="text-right">Actions</TableHead> : null}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {visibleRows.map((row) => (
-            <TableRow key={getRowId(row)}>
+    <div className="flex flex-col gap-3">
+      <div className="overflow-hidden rounded-lg border border-border">
+        <table className="w-full border-collapse text-sm">
+          <thead className="bg-muted/50 text-left text-muted-foreground">
+            <tr>
               {columns.map((column) => (
-                <TableCell key={column.id} className={column.className}>
-                  {column.cell(row)}
-                </TableCell>
+                <th key={column.key} className={cn('px-4 py-2 font-medium', column.className)}>
+                  {column.header}
+                </th>
               ))}
-              {rowActions ? <TableCell className="text-right">{rowActions(row)}</TableCell> : null}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      {pageCount > 1 ? (
-        <div className="text-muted-foreground flex items-center justify-end gap-2 text-sm">
-          <span>
-            Page {currentPage + 1} of {pageCount}
-          </span>
-          <Button variant="outline" size="sm" onClick={() => setPage(currentPage - 1)} disabled={currentPage === 0}>
-            Previous
-          </Button>
+              {rowActions ? <th className="px-4 py-2" aria-label="Actions" /> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={getRowId(row)} className="border-t border-border">
+                {columns.map((column) => (
+                  <td key={column.key} className={cn('px-4 py-2', column.className)}>
+                    {column.render
+                      ? column.render(row)
+                      : String((row as Record<string, unknown>)[column.key] ?? '')}
+                  </td>
+                ))}
+                {rowActions ? (
+                  <td className="px-4 py-2 text-right">{rowActions(row)}</td>
+                ) : null}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {pagination && pagination.pageCount > 1 ? (
+        <div className="flex items-center justify-end gap-3 text-sm">
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setPage(currentPage + 1)}
-            disabled={currentPage >= pageCount - 1}
+            disabled={pagination.page <= 1}
+            onClick={() => pagination.onPageChange(pagination.page - 1)}
+          >
+            Previous
+          </Button>
+          <span className="text-muted-foreground">
+            Page {pagination.page} of {pagination.pageCount}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={pagination.page >= pagination.pageCount}
+            onClick={() => pagination.onPageChange(pagination.page + 1)}
           >
             Next
           </Button>

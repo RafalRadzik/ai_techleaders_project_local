@@ -1,4 +1,0 @@
-/* Admin (backend) styles: the shadcn-ui theme from @devmentor/ui + the admin pages as Tailwind sources. */
-@import "@devmentor/ui/globals.css";
-
-@source "./";

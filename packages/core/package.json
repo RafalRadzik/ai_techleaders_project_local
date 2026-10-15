@@ -1,23 +1,23 @@
 {
   "name": "@devmentor/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
+  "description": "DevMentor — configuration, logging, DI container and domain services",
   "type": "module",
-  "description": "DevMentor domain: models, services and ports. Framework-, ORM- and DI-free.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./validators": "./src/validators/index.ts"
-  },
-  "scripts": {
-    "lint": "eslint",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "./container": "./src/container/index.ts",
+    "./services": "./src/services/index.ts",
+    "./http": "./src/http/index.ts",
+    "./events": "./src/events/index.ts",
+    "./validators/*": "./src/validators/*.ts"
   },
   "dependencies": {
-    "@devmentor/shared": "*",
-    "zod": "^4.6.7"
-  },
-  "devDependencies": {
-    "@devmentor/config": "*"
+    "@devmentor/db": "*",
+    "awilix": "^13.0.5",
+    "pino": "^10.3.1",
+    "zod": "^4.5.4"
   }
 }

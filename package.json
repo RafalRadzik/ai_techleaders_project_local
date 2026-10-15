@@ -2,36 +2,41 @@
   "name": "devmentor",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "npm@11.19.0",
-  "engines": {
-    "node": ">=22.17.0"
-  },
+  "description": "DevMentor — monorepo root",
   "workspaces": [
     "packages/*"
   ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
-    "setup": "node packages/config/bin/setup.mjs",
-    "dev": "npm run dev -w @devmentor/app",
-    "build": "npm run build -w @devmentor/app",
-    "start": "npm run start -w @devmentor/app",
-    "lint": "npm run lint --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
-    "test:integration": "npm run test:integration -w @devmentor/integration",
-    "db:up": "docker compose up -d --wait",
-    "db:down": "docker compose down",
-    "db:migration:create": "npm run migration:create -w @devmentor/db --",
-    "db:migrate": "npm run migration:up -w @devmentor/db",
-    "db:migrate:down": "npm run migration:down -w @devmentor/db",
-    "db:migration:list": "npm run migration:list -w @devmentor/db"
+    "dev": "npm run dev --workspace @devmentor/app --",
+    "build": "npm run build --workspace @devmentor/app",
+    "start": "npm run start --workspace @devmentor/app --",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:unit",
+    "test:unit": "vitest run --config vitest.config.mts",
+    "test:unit:coverage": "vitest run --config vitest.config.mts --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.mts",
+    "test:browser:install": "agent-browser install",
+    "test:browser:install:ci": "agent-browser install --with-deps",
+    "db:migration:create": "npm run migration:create --workspace @devmentor/db --",
+    "db:migrate": "npm run migration:up --workspace @devmentor/db",
+    "db:migrate:down": "npm run migration:down --workspace @devmentor/db",
+    "db:schema:update": "npm run schema:update --workspace @devmentor/db",
+    "db:seed": "npm run seed --workspace @devmentor/db",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down"
   },
   "devDependencies": {
-    "@types/node": "^22",
-    "@vitest/coverage-v8": "^5.0.4",
+    "@testcontainers/postgresql": "12.1.0",
+    "@types/node": "24.10.13",
+    "@vitest/coverage-v8": "4.1.11",
+    "agent-browser": "0.36.0",
     "eslint": "^9",
+    "eslint-config-next": "16.3.3",
     "typescript": "^5",
-    "vitest": "^5.0.4"
+    "vitest": "4.1.11"
   }
 }

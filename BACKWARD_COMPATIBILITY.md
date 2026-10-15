@@ -1,63 +1,204 @@
 # Backward compatibility
 
-What DevMentor treats as a **protected contract surface**, what counts as a breaking change on each, and the path a breaking change must take. Review skills check every PR against this file; implementation skills warn the user when a change does not comply.
+What this repository treats as a protected contract surface, what counts as a breaking
+change to each, and the path such a change must take. Review skills check every PR
+against this file; implementation skills warn when a change is not compliant. Humans
+use it the same way.
 
-DevMentor is pre-1.0 (`0.1.0`), private, and not published to a registry, so most consumers are inside this monorepo. The rules below are scaled to that: in-repo consumers may be updated in the same PR, but anything that reaches outside the repo — the database, HTTP clients, operators' environments — needs the full path.
+The consumers of these surfaces are inside the repository today: the four workspace
+packages consume each other as TypeScript source, the integration harness under
+`tests/integration/` drives the running app, CI and the branch ruleset key on script
+and job names, and the local tooling (`docker-compose.yml`, `openmercato.toml`,
+`scripts/preview.sh`) keys on npm scripts. The packages are private (`0.1.0`,
+unpublished), so there is no external semver to bump. "Breaking" therefore means: a
+consumer listed below stops working, or an operator following `README.md` gets a
+different result.
+
+## General rule
+
+Additive changes are free: a new optional field, a new export, a new route, a new
+event, a new environment variable with a default. Everything else on a surface below is
+a breaking change and follows the path in "How to make a breaking change" at the end.
 
 ## Surfaces
 
-### 1. Database schema and migrations (`packages/db/src/migrations/`)
+### 1. HTTP API (`packages/app/src/app/api/`)
 
-The highest-risk surface: data outlives code.
+**The envelope.** Every `/api/*` route built with `apiHandler` or `makeCrudRoute`
+answers `{ ok: true, data }` or `{ ok: false, error: { code, message, fieldErrors? } }`.
+The shape is declared twice on purpose, in `packages/core/src/http/apiHandler.ts` and
+`packages/ui/src/backend/api/types.ts`, because `ui` must not import `core`.
 
-- **Breaking:** dropping or renaming a table or column, narrowing a type, adding `NOT NULL` without a default/backfill, changing a unique constraint, editing or deleting an already-committed migration or `.snapshot-*.json`.
-- **Required path:**
-  - Every schema change is a new migration generated with `npm run db:migration:create`, reviewed, and committed with the updated snapshot. Never edit an applied or committed migration.
-  - Destructive changes go expand → migrate → contract: add the new shape, backfill and switch code, then drop the old shape in a later PR.
-  - The PR is `risk-high`, carries an up-and-down migration test, and states a rollback plan in its body.
+**Status and error codes**, from `packages/core/src/http/errors.ts` and `apiHandler.ts`:
+400 `bad_request`, 401 `unauthorized`, 403 `forbidden`, 404 `not_found`,
+409 `conflict`, 422 `validation_failed` (with `fieldErrors`, keyed by dotted path or
+`_root`), 500 `internal_error`. The client adds `network_error` and
+`invalid_response` in `apiCall.ts`.
 
-### 2. HTTP API (`packages/app/app/api/**/route.ts`)
+**Routes in place:**
 
-Current routes: `GET /api/health`, `GET /api/users`, `POST /api/users`.
+- `GET /api/health`: a plain JSON probe, not enveloped:
+  `{ status: "ok", app, environment, database: "up" | "down", databaseError? }`, HTTP
+  200 even when the database is down. `tests/integration/global-setup.ts` polls it and
+  waits for `status === "ok"` and `database === "up"`; `README.md` documents it.
+- `GET /api/users` returns `UserDto[]`; `POST /api/users` takes
+  `{ email, displayName }` (`userCreateSchema`) and returns `UserDto`, where
+  `UserDto = { id, email, displayName, createdAt (ISO string), mentorProfile: { id, headline } | null }`.
+  The route is intentionally public until the `auth` concept lands.
+- `makeCrudRoute` behavior asserted by `packages/core/src/http/makeCrudRoute.test.ts`:
+  the default id parameter `id`, and the messages "This operation is not supported",
+  "Missing resource id", and "Request body must be valid JSON".
 
-- **Breaking:**
-  - Removing a route or method, or changing its path.
-  - Changing the `ApiResult` envelope (`{ ok: true, data }` / `{ ok: false, error: { code, message, fieldErrors? } }`) or the status code mapping of `AppError` subclasses.
-  - Removing or renaming a field in `data`, changing its type, or adding a required request field.
-  - Changing the error `code` strings (`not_found`, `unauthorized`, `forbidden`, `conflict`, `validation_failed`).
-  - Changing the CSRF header contract (`x-devmentor-client: 1`) for state-changing methods.
-  - `/api/health`: changing its status-code contract (200 when up, 503 otherwise) or the `name`/`status`/`latencyMs` shape of `checks` — monitoring depends on it.
-- **Non-breaking:** adding routes, optional request fields, or response fields.
-- **Required path:** prefer additive changes. When a break is unavoidable, update every in-repo caller (`apiCall` users, integration tests) in the same PR, note it in the PR body and `CHANGELOG.md` when one exists, and mark the PR `risk-high`.
+**Breaking:** removing or renaming a response field; changing a status code, an error
+code, or the envelope shape; making a currently public route require a session without
+shipping the client side of it; changing `/api/health` to return non-200 on database
+loss (the file itself calls this out as an option; it also breaks the readiness poll).
 
-### 3. Shared workspace package APIs (`package.json#exports`)
+**Required path:** change both envelope declarations together; update the unit tests
+and the integration scenarios that assert on the route; update `README.md` where the
+route is documented; list the change under "Breaking changes" in the PR body. A new
+error code is additive as long as existing codes keep their meaning.
 
-Entry points consumed across packages: `@devmentor/shared`, `@devmentor/core`, `@devmentor/core/validators`, `@devmentor/db`, and the `@devmentor/ui` subpaths (`components/*`, `backend/*`, `backend/api/*`, `lib/*`, `hooks/*`, `globals.css`).
+### 2. Workspace package exports
 
-- **Breaking:** removing or renaming an export or an `exports` subpath; changing a function signature, a port interface (`UserRepository`, `HealthIndicator`), a domain type (`User`, `HealthReport`), a Zod schema's accepted shape, or the props of `CrudForm`/`DataTable`/feedback components in an incompatible way.
-- **Required path:** all consumers are in this monorepo, so update every importer in the same PR; `npm run typecheck` and `npm run lint` must pass across all workspaces. Changing a shared schema also changes the HTTP contract (surface 2) — apply that path too.
+The `exports` maps in each `package.json` and the named exports behind them are the
+API between packages. `npm run typecheck` is the consumer check.
 
-### 4. Environment variables (`.env.example`)
+- `@devmentor/core` (`.`, `./container`, `./services`, `./http`, `./events`,
+  `./validators/*`): `getEnv`, `createLogger`, `getContainer`, `withScope`, the
+  `Cradle` keys (`env`, `logger`, `orm`, `eventBus`, `em`, `userService`),
+  `UserService` and `UserDto`, the `AppError` family and `isAppError`, `apiHandler`,
+  `jsonOk`, `jsonError`, `makeCrudRoute` with `CrudService` and
+  `MakeCrudRouteOptions`, `readSession`, `requireSession`, `requireRole`,
+  `assertOwnership`, `Session`, `Role` (`'student' | 'mentor'`), `EventBus`,
+  `EventMap`, `userCreateSchema`, and the re-exported `checkDbConnection`.
+- `@devmentor/db` (`.`, `./entities`, `./config`): `User`, `MentorProfile`, `IUser`,
+  `IMentorProfile`, `baseProperties`, `entities`, `createOrmConfig`, `getOrm`,
+  `closeOrm`, `checkDbConnection`, `getDbEnv`, `MikroORM`, `EntityManager`, and the
+  re-exported `EntityRepository`, `FilterQuery`, `Loaded`, `RequiredEntityData`.
+- `@devmentor/ui` (`.`, `./backend`, `./tokens.css`, `./lib/utils`, `./components/*`):
+  `cn`, `Button` and `buttonVariants`, the `Card*` family; from `./backend`:
+  `apiCall`, `apiCallOrThrow`, `ApiError`, `ApiCallOptions`, `ApiResult`,
+  `FieldErrors`, `CrudForm` with `CrudField`, `CrudFieldType`, `CrudFormProps`,
+  `DataTable` with `Column`, `DataTableProps`, `DataTablePagination`,
+  `LoadingMessage`, `ErrorMessage`, `EmptyState`; from `./tokens.css`: the CSS
+  variable names (`--background`, `--foreground`, `--primary`, `--destructive`,
+  `--border`, `--ring`, ...) that Tailwind utilities map onto.
 
-Operators' `.env` files depend on these: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT`, `DATABASE_URL`, `DATABASE_POOL_MIN`, `DATABASE_POOL_MAX`, `DATABASE_POOL_IDLE_TIMEOUT_MS`, `MIKRO_ORM_DEBUG`.
+**Breaking:** removing an export or a subpath; changing a function signature, a
+component prop, or a `Cradle` key; changing the dependency direction
+(`app -> core -> db`, `ui` standalone) enforced by `eslint.config.mjs`.
 
-- **Breaking:** renaming or removing a variable, making an optional one required, changing its format or units.
-- **Required path:** add the new variable alongside the old one and read both for a transition period, or document the change in `.env.example`, the README env table, and the PR body as a required operator action.
+**Required path:** update every in-repo consumer in the same PR so `npm run typecheck`
+and `npm run lint` stay green; keep the old name as a re-export for one PR only when
+the change spans several concepts; note it in the PR body.
 
-### 5. Root npm scripts (`package.json#scripts`)
+### 3. Database schema, migrations, and seed data (`packages/db/`)
 
-`dev`, `build`, `start`, `lint`, `typecheck`, `test`, `test:coverage`, `test:integration`, `db:*` are used by CI (`.github/workflows/ci.yml`), the agent pipeline (`.ai/agentic.config.json` validation commands), `AGENTS.md`, and the README.
+- Tables: `users` (`id` uuid, `created_at`, `updated_at`, `email` unique,
+  `display_name`) and `mentor_profiles` (`id`, timestamps, `user_id` unique with a
+  cascading foreign key to `users`, `headline`, `bio` nullable,
+  `years_of_experience` default 0). Column names are snake_case mappings of the
+  camelCase entity properties.
+- Migrations live in `packages/db/migrations/Migration<timestamp>.ts` next to the
+  committed snapshot `.snapshot-devmentor.json`, run transactionally, and are
+  generated with `npm run db:migration:create -- --name <x>`. The integration harness
+  pins `MIKRO_ORM_MIGRATIONS_SNAPSHOT_NAME=.snapshot-devmentor` so a test run never
+  creates a second snapshot.
+- The seeder `packages/db/src/seeders/database.seeder.ts` creates one user
+  (`ada@devmentor.dev`, `Ada Lovelace`) with a mentor profile
+  (`Systems & algorithms mentor`). `tests/integration/admin.integration.test.ts`
+  asserts on those exact cells.
 
-- **Breaking:** removing or renaming a script, or changing what it validates.
-- **Required path:** update CI, `.ai/agentic.config.json`, `SDLC.md`, `AGENTS.md`, and the README in the same PR (CI and config changes need user agreement per `AGENTS.md`).
+**Breaking:** dropping or renaming a table or column; tightening a constraint that
+existing rows may violate; editing an already applied migration or the snapshot by
+hand; changing the seeded values the integration test asserts on.
 
-### 6. Public pages and routes (`packages/app/app/`)
+**Required path:** a new migration with both `up` and `down`, exercised in both
+directions; a rollback plan in the PR body; renames as expand-then-contract (add the
+new column, backfill, switch the code, drop the old column in a later PR); the seeder
+and the integration test updated together; `risk-high` plus `needs-qa` per `SDLC.md`.
 
-Current URLs: `/` (frontend) and `/admin`, `/admin/users` (admin).
+### 4. Configuration and environment
 
-- **Breaking:** removing or moving a user-facing URL.
-- **Required path:** add a redirect (in `next.config.ts`, with user agreement) or call it out in the PR body; update integration tests.
+Variables, as listed in `.env.example`: `NODE_ENV`, `APP_NAME`, `LOG_LEVEL`,
+`DATABASE_URL` (takes precedence), `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`,
+`DB_PASSWORD`, `DB_POOL_MIN`, `DB_POOL_MAX`, `DB_POOL_IDLE_MS`, `DB_DEBUG`. Two zod
+schemas describe them, `packages/core/src/config/env.ts` for the app and
+`packages/db/src/env.ts` for the MikroORM CLI, and they must agree. The harness sets
+`NODE_ENV=production`, `NEXT_TELEMETRY_DISABLED=1`, and pool sizes in
+`tests/integration/environment.ts`; `.github/workflows/ci.yml` sets
+`NEXT_TELEMETRY_DISABLED`.
 
-## Not protected
+**Breaking:** a new variable without a default; renaming or removing a variable;
+changing a default in a way that changes runtime behavior; dropping the
+`DATABASE_URL` precedence.
 
-Internal module layout inside a package (anything not reachable through `exports`), test helpers (`*.test-utils.ts`), generated files, and `.ai/` metadata may change freely, as long as the surfaces above stay intact.
+**Required path:** both schemas, `.env.example`, `README.md`, the CI workflow, and the
+harness environment updated in the same PR; a default wherever one is sensible.
+
+### 5. npm scripts and CI check names
+
+The root `package.json` scripts are this repository's command-line interface. They are
+referenced by `README.md`, `AGENTS.md`, `.github/workflows/ci.yml`,
+`.ai/agentic.config.json` (`validation.commands`), `SDLC.md`, `openmercato.toml`
+(`scripts/preview.sh` runs `npm run dev`), and `tests/integration/run.sh` and
+`run.ps1`. The CI job names `Build`, `Lint`, `Unit tests`, and `Integration tests` are
+what the branch ruleset requires.
+
+**Breaking:** renaming or removing a script; renaming a CI job.
+
+**Required path:** update every reference above in the same PR; for a job rename, a
+maintainer updates the ruleset before the PR merges, otherwise the PR blocks itself.
+
+### 6. Domain events (`packages/core/src/events/event-map.ts`)
+
+Event ids follow `concept.entity.action`. Today: `auth.user.created` with payload
+`{ userId, email }`, subscribed in `packages/core/src/container/container.ts`.
+
+**Breaking:** renaming an event id; removing or retyping a payload field.
+
+**Required path:** add the new event, move subscribers, remove the old event in a later
+PR; adding a payload field is additive.
+
+### 7. Session and CSRF conventions
+
+The session cookie name `devmentor_session` and the `Role` union live in
+`packages/core/src/http/auth.ts`; the CSRF header `x-devmentor-request` is set by
+`apiCall` in `packages/ui/src/backend/api/apiCall.ts`. Real session verification and
+the server-side header check are not implemented yet; every guarded route currently
+denies.
+
+**Breaking:** once auth ships, renaming the cookie or the header, or changing the
+`Role` values.
+
+**Required path:** change `core/src/http/auth.ts` and `ui/src/backend/api/apiCall.ts`
+together, with an integration scenario covering the denied path.
+
+### 8. Product decisions (`.ai/specs/product-brief.md`)
+
+The Non-goals, Business rules, and Decisions tables carry stable ids, owners, and a
+review-by date. A PR that builds what a non-goal excludes, or contradicts a rule or a
+decision, is a review blocker unless the same PR carries a superseding entry approved
+by the entry's owner. `SDLC.md` describes the mechanism.
+
+## How to make a breaking change
+
+1. Name the surface and the entry above in the PR body under a "Breaking changes"
+   heading, and say who is affected and how they migrate.
+2. Update this file in the same PR when the surface itself changes shape.
+3. Update every in-repo consumer in the same PR; the validation gate
+   (`npm run typecheck`, `npm run lint`, `npm run test`, `npm run build`) and the CI
+   integration check are the proof.
+4. Prefer expand-then-contract over a single cut for schema and export renames.
+5. Label the PR `risk-high` where `SDLC.md` says so (schema migrations, shared
+   contract surfaces, auth, money) and get a second reviewer.
+
+## What is not protected
+
+Internal, unexported helpers; the markup of the admin and public pages beyond the
+semantics the integration tests assert on (the headings `Dashboard` and `Users`, the
+link `Users`, the text `Connected`, the seeded table cells, and the landing heading
+`Grow faster with the right mentor.`); Tailwind class choices; and the placeholder
+`User` and `MentorProfile` fields, which `README.md` describes as a demo model. Even
+those change through migrations and tests, only without the breaking-change paperwork.

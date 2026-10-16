@@ -201,6 +201,12 @@ Always use `apply_issue_label "<label>" "{issueId}"` / `remove_issue_label "<lab
 
 #### get-issue-comment
 
+Dispatch by source context: for a PR conversation comment, execute
+**get-issue-comment** from `.ai/trackers/github.md`; for a Jira issue,
+use the native operation below. Preserve repository/PR context and the opaque
+source comment handle unchanged, with the same outputs. Never infer the provider
+from the handle alone; missing source context is a blocker, not a native fallback.
+
 Parse the opaque `{issueKey}:{commentId}` handle, list that issue's comments, and select the requested id:
 
 ```bash
@@ -220,6 +226,12 @@ acli jira workitem comment list --key "$issue_key" --paginate --json \
 
 #### list-issue-comments
 
+Dispatch by source context: for a PR, execute **list-issue-comments** from
+`.ai/trackers/github.md`; for a Jira issue, use the native operation below.
+Preserve repository/PR context, pagination, outputs, and every opaque source
+comment handle unchanged for subsequent reads/updates. Never route PR numbers
+to Jira or rewrite GitHub comment ids as native handles.
+
 Return normalized comments whose `id` is the composite handle consumed by the two comment-id operations:
 
 ```bash
@@ -231,6 +243,12 @@ acli jira workitem comment list --key "{issueId}" --paginate --json \
 ```
 
 #### update-comment
+
+Dispatch by the original comment's source context: for a PR conversation comment,
+execute **update-comment** from `.ai/trackers/github.md`; for a Jira issue,
+use the native operation below. Preserve repository/PR context, body inputs,
+outputs, and the opaque source comment handle unchanged. Missing source context
+is a blocker; never send a GitHub handle to Jira.
 
 ```bash
 printf '%s' "$COMMENT_HANDLE" | grep -Eq '^[A-Z][A-Z0-9_]+-[0-9]+:[0-9]+$' || {

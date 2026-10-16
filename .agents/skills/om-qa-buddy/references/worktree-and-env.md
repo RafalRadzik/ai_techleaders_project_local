@@ -48,16 +48,39 @@ changes.
 
 ## Boot the app via `om-prepare-test-env`
 
-Never boot the app by hand. Invoke the `om-prepare-test-env` skill (mode
+Never boot the app by hand. Before invoking the skill, initialize ownership
+in the actual tested worktree (also in local mode):
+
+```bash
+ENV_WORKTREE=$(pwd -P)
+REPO_ROOT=${REPO_ROOT:-$(git rev-parse --show-toplevel)}
+TEST_ENV_REUSED=unknown
+STARTED_BY_THIS_RUN=false
+ENV_STOPPED=0
+```
+
+Invoke the `om-prepare-test-env` skill (mode
 `auto`; pass `--no-ephemeral` when the app clearly needs no backing
 services). It discovers or provisions a runnable instance, installs the
 configured browser provider when missing, and writes the environment
-descriptor. Then read it:
+descriptor. Preserve its current invocation's machine-readable report
+(`references/entrypoint-contract.md`): set `TEST_ENV_REUSED` only from its
+`TEST_ENV_REUSED=0` (fresh boot) or `TEST_ENV_REUSED=1` (reuse) result line.
+Never reuse an earlier invocation's result. Missing, conflicting, failed, or
+ambiguous results remain `unknown`, including generation/repair whose cold and
+warm reports cannot establish ownership. `startedByThisRepo` alone does not
+establish ownership by this invocation. Then read the descriptor using the
+tested worktree's config, not the durable evidence path:
 
 ```bash
-ENV_DESCRIPTOR="$QA_DIR/test-env.json"
+ENV_QA_DIR=$(jq -r '.paths.qa // ".ai/qa"' .ai/agentic.config.json 2>/dev/null || echo ".ai/qa")
+case "$ENV_QA_DIR" in /*) ;; *) ENV_QA_DIR="$ENV_WORKTREE/$ENV_QA_DIR" ;; esac
+ENV_DESCRIPTOR="$ENV_QA_DIR/test-env.json"
 BASE_URL=$(jq -r '.baseUrl' "$ENV_DESCRIPTOR")
-STARTED_BY_THIS_RUN=$(jq -r '.startedByThisRepo // false' "$ENV_DESCRIPTOR")
+if [ "$TEST_ENV_REUSED" = "0" ] &&
+   [ "$(jq -r '.startedByThisRepo // false' "$ENV_DESCRIPTOR")" = "true" ]; then
+  STARTED_BY_THIS_RUN=true
+fi
 ```
 
 Read `$BROWSER_FILE` and drive its named operations (**open**, **snapshot**,
@@ -77,14 +100,20 @@ in the final report and stop — this is not a product defect to work around.
 
 ## Cleanup sequence (step 9, run in a `trap`/finally so a crash also cleans up)
 
+Close the browser first. Only when `STARTED_BY_THIS_RUN=true`, change to
+`$ENV_WORKTREE` and invoke `om-prepare-test-env --stop` there, while its
+descriptor and scripts still exist. Set `ENV_STOPPED=1` only after teardown
+confirms success. If reused, uncertain, or teardown fails, retain the environment
+**and its worktree**, and report the retained paths for later cleanup. A trap
+that cannot invoke the skill must retain them rather than guess a stop command.
+Then run:
+
 ```bash
 cd "$REPO_ROOT"
-if [ "$CREATED_WORKTREE" = "1" ]; then
+if [ "${CREATED_WORKTREE:-0}" = "1" ] && [ "${ENV_STOPPED:-0}" = "1" ]; then
   git worktree remove --force "$WORKTREE_DIR"
 fi
 git worktree prune
 ```
 
-Tear down the environment only when `STARTED_BY_THIS_RUN` is true, via
-`om-prepare-test-env --stop` — otherwise leave it running for reuse by a
-later session.
+Never remove the worktree before teardown or stop a reused environment.

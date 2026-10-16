@@ -181,6 +181,12 @@ Always use `apply_issue_label "<label>" "{issueId}"` / `remove_issue_label "<lab
 
 #### get-issue-comment
 
+Dispatch by source context: for a PR conversation comment, execute
+**get-issue-comment** from `.ai/trackers/github.md`; for a Linear issue,
+use the native operation below. Preserve repository/PR context and the opaque
+source comment handle unchanged, with the same outputs. Never infer the provider
+from the handle alone; missing source context is a blocker, not a native fallback.
+
 Comment id → body, author, URL. The dedicated CLI has list/update but no single-comment read, so use its documented GraphQL fallback:
 
 ```bash
@@ -200,6 +206,12 @@ GRAPHQL
 ```
 
 #### list-issue-comments
+
+Dispatch by source context: for a PR, execute **list-issue-comments** from
+`.ai/trackers/github.md`; for a Linear issue, use the native operation below.
+Preserve repository/PR context, pagination, outputs, and every opaque source
+comment handle unchanged for subsequent reads/updates. Never route PR numbers
+to Linear or rewrite GitHub comment ids as native handles.
 
 The dedicated list command currently returns only its first connection page. Use the CLI's `api --paginate` fallback so lock and marker detection sees the whole history:
 
@@ -228,6 +240,12 @@ GRAPHQL
 The JSON array carries `id`, `body`, `createdAt`, `updatedAt`, `url`, user/external-user identity, and parent id for every page.
 
 #### update-comment
+
+Dispatch by the original comment's source context: for a PR conversation comment,
+execute **update-comment** from `.ai/trackers/github.md`; for a Linear issue,
+use the native operation below. Preserve repository/PR context, body inputs,
+outputs, and the opaque source comment handle unchanged. Missing source context
+is a blocker; never send a GitHub handle to Linear.
 
 ```bash
 linear issue comment update "{commentId}" --body-file <body-file>

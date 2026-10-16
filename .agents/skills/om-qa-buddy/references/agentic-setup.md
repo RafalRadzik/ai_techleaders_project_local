@@ -46,20 +46,31 @@ reference lines. Config-loading snippet (tolerates a missing config):
 
 ```bash
 CONFIG=.ai/agentic.config.json
+QA_ORIGIN=$(pwd -P)
 TRACKER=$(jq -r '.tracker // ""' "$CONFIG" 2>/dev/null || echo "")
 QA_DIR=$(jq -r '.paths.qa // ".ai/qa"' "$CONFIG" 2>/dev/null || echo ".ai/qa")
 BROWSER_PROVIDER=$(jq -r '.browser.provider // "playwright"' "$CONFIG" 2>/dev/null || echo "playwright")
 case "$BROWSER_PROVIDER" in
   ''|*[!A-Za-z0-9._-]*) echo "Invalid browser.provider: $BROWSER_PROVIDER" >&2; exit 1 ;;
 esac
-BROWSER_FILE=".ai/browsers/${BROWSER_PROVIDER}.md"
+BROWSER_FILE="$QA_ORIGIN/.ai/browsers/${BROWSER_PROVIDER}.md"
 RUN_ID="$(date -u +%Y%m%d-%H%M%S)-$$"
-ARTIFACTS_DIR="$QA_DIR/artifacts_${RUN_ID}"
-KB_DIR="$QA_DIR/knowledge-base"
+# ARTIFACTS_OVERRIDE is the literal --artifacts value, if supplied.
+ARTIFACTS_DIR="${ARTIFACTS_OVERRIDE:-$QA_DIR/artifacts_${RUN_ID}}"
+case "$ARTIFACTS_DIR" in /*) ;; *) ARTIFACTS_DIR="$QA_ORIGIN/$ARTIFACTS_DIR" ;; esac
+case "$QA_DIR" in
+  /*) KB_DIR="$QA_DIR/knowledge-base" ;;
+  *) KB_DIR="$QA_ORIGIN/$QA_DIR/knowledge-base" ;;
+esac
 mkdir -p "$ARTIFACTS_DIR" "$KB_DIR"
 ```
 
-`--artifacts <dir>` overrides `ARTIFACTS_DIR`. `--base <branch>` overrides
+Set `ARTIFACTS_OVERRIDE` to `--artifacts <dir>` before running this snippet
+(unset it when absent). Relative overrides resolve against the invocation
+directory; absolute overrides stay absolute. Durable artifacts, knowledge, and
+the browser descriptor remain anchored there across worktree transitions.
+Keep `QA_DIR` unchanged: the environment descriptor belongs to the tested worktree.
+`--base <branch>` overrides
 the config's `baseBranch` (a `baseBranch` of `auto` resolves to the repo's
 default branch) for diff scope. The knowledge base under `$KB_DIR` persists
 across runs — it is not part of `$ARTIFACTS_DIR` and is never deleted by

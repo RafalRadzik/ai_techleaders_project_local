@@ -9,19 +9,25 @@ Work enters through two paths: a free-form task brief handed to an agent, or a f
 
 Before intake, the work is shaped: `om-brainstorm` turns an idea or a question into a routing decision and a brief, and the spec skills (`om-spec-writing`, `om-auto-write-spec`) turn a feature into a design document before anything is built. Those steps feed the table below; they are not the ticket flow itself, and the Definition of Ready is the contract between them and Intake.
 
+<!-- discovery:start -->
+Before any of that, `om-discover` establishes the product context every later decision reads: `.ai/specs/product-brief.md` — who the users are, what hurts, what the product is not, which rules and decisions bind the work. The Definition of Ready below is the contract between that context and Intake.
+<!-- discovery:end -->
+
 ## Roles
 
 - **Author** — the human or agent who writes the change. Owns the ticket from claim to a merge-ready PR.
 - **Reviewer** — reads the diff and approves or requests changes. May be a human or the `om-auto-review-pr` skill; the `om-code-review` checklist applies either way.
 - **QA reviewer** — manually exercises user-facing changes before they merge. Always referenced by role, never by name or handle: assignments change.
+- **Product owner** — owns the why and the value: the product brief, the scope split (now, later, not doing), the success criteria, and the ticket-level tier of the Definition of Ready. Confirms the brief before it is written and the backlog tree before it is filed; owns every product decision in the brief that names no other owner. Referenced by role, never by name. <!-- discovery -->
+- **Discovery design** — the declared design owner uses `om-mockup-prototype` for neutral discovery flows and settles detailed visuals during specification. The design contract in `.uxproof/` is extracted by `om-ux-setup` or maintained by the team. `om-ux-review-pr` is their advisory review; QA checks conformance to their contract. <!-- discovery -->
 - **Maintainer** — owns branch protection, the label taxonomy, the config, and this document; arbitrates when gates conflict.
 
 ## Ticket lifecycle
 
 | Stage | What happens | Driven by | Done when |
 |---|---|---|---|
-| Discovery | An idea, question, or itch is talked through before any artifact exists: the problem is questioned, alternatives (including building nothing) are weighed, and the conversation ends in a routing decision — an answer, a filed ticket, a brief for a spec, or a direct change. | `om-brainstorm` or a human | Conversation routed; a brief written when the work continues |
-| Intake | A ticket or task brief is filed in github and meets the Definition of Ready below. `om-prepare-issue` files it with SDLC labels and the ready sections; `om-auto-manage-issues` reports what an existing ticket still lacks. | Anyone, `om-prepare-issue`, `om-auto-manage-issues` | Ticket exists and is ready, or its gaps are named on the ticket |
+| Discovery | The product context is established before any idea is weighed — problem and who has it, stakeholders, rules, flows, success criteria, scope — from material that exists, with every claim tagged by its evidence and every decision owned by a person; the product owner confirms the brief before it is written. Then an idea, question, or itch is talked through: the problem is questioned, alternatives (including building nothing) are weighed, and the conversation ends in a routing decision. | `om-discover` (product level, with the product owner), `om-synthetic-users` (first panel), `om-mockup-prototype` (optional low-fi flow), `om-discover --refresh`, `om-backlog --dry-run`, and `om-brainstorm` (one idea), or a human | A product brief, or a routed conversation with a brief when the work continues <!-- discovery --> |
+| Intake | A ticket or task brief is filed in github and meets the Definition of Ready below. `om-prepare-issue` and `om-backlog` file it with SDLC labels and the ready sections; `om-auto-manage-issues` reports what an existing ticket still lacks. | Anyone, `om-prepare-issue`, `om-backlog`, `om-auto-manage-issues` | Ticket exists and is ready, or its gaps are named on the ticket <!-- discovery --> |
 | Triage | Confirm the issue is real, still unfixed on `master`, and not already claimed or covered by an open PR. Read-only; stops the chain cleanly when there is nothing to do. | `om-verify-in-repo` or a human | Confirmed actionable, or closed as no-action |
 | Claim | The author claims the ticket so concurrent agents back off. See the claim protocol below. | `om-fix` / `om-auto-create-pr`, or a human | Claim visible on the ticket |
 | Implement | Locate the minimal change surface (`om-root-cause`, read-only), then implement the change with regression tests and run the validation gate. Task briefs without a ticket go through `om-auto-create-pr`, which plans, implements phase by phase in an isolated worktree, and runs the same gate. | `om-root-cause` + `om-fix`, `om-auto-create-pr`, or a human author | Change complete, validation gate green |
@@ -33,6 +39,7 @@ Before intake, the work is shaped: `om-brainstorm` turns an idea or a question i
 
 After merge, this process stops. Deployment, smoke tests, monitoring, and rollback belong to the repository's release process, not to this document: the Release Manager role drafts the changelog with `om-auto-update-changelog` and reconciles the tracker with `om-close-fixed-issues`, and `om-pipeline-retro` reads finished runs to rank what second passes cost. Merge is where this document ends; delivering the change to users is a separate process the team owns.
 
+<!-- discovery:start -->
 ## Definition of Ready
 
 A ticket is ready for implementation when the answers below are on the ticket or in a spec it links. They come in two tiers, because a spec can supply the second but never the first.
@@ -64,6 +71,7 @@ When `om-discover` has written `.ai/specs/product-brief.md`, its **Non-goals**, 
 - The decisions in play are surfaced where people work, not remembered: `om-auto-manage-issues` lists them in its implementation-notes comment, `om-spec-writing` carries a *Decisions in play* section, and every PR body carries *Decisions touched*. A newcomer or a new agent reads them at the issue, the spec, or the PR, not in a chat history.
 - An autonomous assumption a human confirmed on a spec PR (the resolved-assumptions comment) is recorded as a decision on the next `om-discover --refresh`, with the confirmer as owner, so the reason a thing is the way it is survives the people who decided it.
 - Decisions age: an entry past its review-by date is flagged in review as due for a look, not enforced blindly. Which entries block more than they protect is a retro question.
+<!-- discovery:end -->
 
 ## Label state machine
 
@@ -160,3 +168,7 @@ Any non-zero exit fails the gate and blocks the PR. The implementing skills run 
 ## Amending this process
 
 This document and `.ai/agentic.config.json` describe the same process: change them together, and re-run the `om-setup-agent-pipeline` skill when the toolchain or label taxonomy changes. Per-skill deviations — extra review rules, a different PR body template, an added gate step — belong in a repo-local skill of the same name at `.ai/skills/<skill-name>/SKILL.md`, which takes precedence over the installed skill (and can `@`-import or reference it to extend rather than replace it); local rules win, but a repo-local skill cannot grant what the installed skill's safety rules forbid.
+
+<!-- discovery:start -->
+The product-layer blocks between `<!-- discovery:start -->` and `<!-- discovery:end -->` are owned by `om-setup-discovery-pipeline`: re-run it to add or refresh them, and edit everything else by hand.
+<!-- discovery:end -->

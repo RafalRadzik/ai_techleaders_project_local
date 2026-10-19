@@ -9,7 +9,6 @@ Omit the link for lessons short enough to state inline.
 
 <!-- Add new entries below this line, most recent first. -->
 
-- 2026-10-16 — Anchor durable QA/browser paths before changing worktrees; `startedByThisRepo` is not invocation ownership. Use the current prepare report's reuse result, retain uncertain environments, and stop owned instances from their environment context before deleting a worktree. Hybrid tracker comment handles must retain their source context.
 - 2026-09-02 — In a shared `makeCrudRoute`, don't assume Next always passes `ctx.params`. A **collection** route (`/api/users/route.ts`, non-dynamic) is invoked with no params, so `await ctx.params` is `undefined` and `params[idParam]` throws `Cannot read properties of undefined (reading 'id')`. Guard: `const params = ctx?.params ? await ctx.params : undefined`.
 - 2026-09-02 — Services return **DTOs (plain objects), not ORM entities**, across the API boundary. `JSON.stringify` of a MikroORM entity with a bidirectional relation (User 1:1 MentorProfile) risks a cycle; a `toDto()` mapper in the service keeps the envelope clean and gives the route a stable shape. See `.ai/specs/2026-09-01-engineering-standards.md` (SRP).
 - 2026-09-02 — The API envelope is a **shape convention, not a shared type**: `@devmentor/core/http` (`ApiResponseBody`) and `@devmentor/ui/backend/api` (`ApiResult`) declare it independently because `ui` must not import `core`. `ui` gained a `zod` dependency so `CrudForm` can take the same schema the server validates with (DRY without importing core).

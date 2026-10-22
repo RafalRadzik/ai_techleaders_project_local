@@ -1,0 +1,33 @@
+{
+  "format": "discovery-prototype-v1",
+  "skill": "om-mockup-prototype",
+  "slug": "mentor-onboarding",
+  "revision": 1,
+  "revisionPath": ".ai/prototypes/discovery/mentor-onboarding/revision-001",
+  "previousRevision": null,
+  "brief": ".ai/specs/product-brief.md",
+  "flow": "mentor onboarding",
+  "panelReport": null,
+  "verification": "passed",
+  "files": [
+    { "path": "index.html", "sha256": "747261f647a2dbe99f9ccac0c1fc52635303791c52d768bb2fb254032f7ff464" },
+    { "path": "README.md", "sha256": "1e0fb1286b01797f2b575f92e7edee4d4c555d44ebf8d516338472d947c76d80" },
+    { "path": "evidence/01-invitation.png", "sha256": "91e457e4f2f9bc75110cd28013003184580e2734ddb67cd69e0e3084e0123e97" },
+    { "path": "evidence/02-denied.png", "sha256": "763eae8819af202c8a91774a38174061c82fbdb0ebbb41c6bd398a090f087195" },
+    { "path": "evidence/03-unknown.png", "sha256": "8a48346e1e732d40c3a9ffabed16ea3246ad6141bb3e511d0e9426089bc205e8" },
+    { "path": "evidence/04-invitation-expired.png", "sha256": "2806e458e07fe86c27e632578d693543d1c851040edfc8e407b7a2d418d00558" },
+    { "path": "evidence/05-signin.png", "sha256": "6d0a35739830562f2ba7256e46413226cbabf56b23b5e6dbf1c6d5782c11dd28" },
+    { "path": "evidence/06-github-cancelled.png", "sha256": "9814b147a506cbc38b4470ab11c31df605a02e29952d3840e221776691fb9750" },
+    { "path": "evidence/07-email-validation.png", "sha256": "31a87388a99700d6c121206f582aa748df48516df205b868e483994e09bbc10d" },
+    { "path": "evidence/08-profile.png", "sha256": "02d0929fa0180b7153daee1d80b5079c36b330f773d844190c709a7bcaf69d5c" },
+    { "path": "evidence/09-profile-errors.png", "sha256": "fbfd19897b5650c4349c51997852a495686eb7d195e085d0949f8997c954206f" },
+    { "path": "evidence/10-prices.png", "sha256": "57ad9f62bf855b66a6d7065998826515c4606f8d2e743acbd5fe85d64f6ece74" },
+    { "path": "evidence/11-prices-errors.png", "sha256": "155dd7e53c879d1e76f3addbdb73f1ccae9963a50c17f13f1cdff1e7a1ee523f" },
+    { "path": "evidence/12-slots.png", "sha256": "d079a1d4fc1b6b822b09e376859045604fc820b4d734ef5c26bb73034421849b" },
+    { "path": "evidence/13-slot-error.png", "sha256": "6fa0e024e749d060b1fae668b72bf551c534b8bd2eb4674deedecfb65fcc63dc" },
+    { "path": "evidence/14-slots-added.png", "sha256": "5150d550ca6df52bdfa22626974e74af994c8be2663a866be0ce432fc3e87710" },
+    { "path": "evidence/15-done.png", "sha256": "bedb947f60568b9f0e07c916cae9f05bc6a331e8d1b36646cdb3c7f0abe64575" },
+    { "path": "evidence/16-connect.png", "sha256": "d2983bb4e2c877cf7701f2412a8f14a640573dd9a86ed092a5e35498d1008ba8" },
+    { "path": "evidence/17-narrow-signin.png", "sha256": "660c9500f9b9fbcb31cc6ddc8f3016485b8a1c964cf8bd223510ccad92d38a15" }
+  ]
+}

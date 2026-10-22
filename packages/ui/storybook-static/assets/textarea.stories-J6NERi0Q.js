@@ -1,0 +1,14 @@
+import{n as e}from"./rolldown-runtime-DkW27tQK.js";import{t}from"./react-BZJXY1be.js";import{t as n}from"./jsx-runtime-DeHZSEgm.js";import{n as r,t as i}from"./textarea-CKPa35FA.js";import{n as a,t as o}from"./FormField-BL5wf3Sf.js";function s(){let[e,t]=(0,c.useState)(``);return(0,l.jsx)(o,{label:`Short introduction`,description:`${e.length} of 200 characters`,children:n=>(0,l.jsx)(i,{...n,maxLength:200,value:e,onChange:e=>t(e.target.value)})})}var c,l,u,d,f,p,m,h,g;function _(){return(_=e((()=>{c=t(),a(),r(),l=n(),u={title:`Primitives/Textarea`,component:i,tags:[`autodocs`],args:{placeholder:`Describe the problems you can help developers solve.`,rows:4},render:e=>(0,l.jsx)(`div`,{style:{width:`min(100%, 400px)`},children:(0,l.jsx)(o,{label:`Mentor introduction`,description:`Be specific about your experience.`,children:t=>(0,l.jsx)(i,{...e,...t})})}),parameters:{docs:{description:{component:`A resizable, multiline native field with a 12 px radius. Associate labels and errors using FormField. Length limits come from the feature schema.`}}}},d={},f={args:{defaultValue:`I help teams diagnose tricky React rendering bugs and design maintainable TypeScript APIs.`}},p={args:{disabled:!0,defaultValue:`This introduction is being saved.`}},m={render:e=>(0,l.jsx)(o,{label:`Reason for declining`,required:!0,error:`Add a comment so your mentor can revise the note.`,children:t=>(0,l.jsx)(i,{...e,...t,placeholder:`Explain what needs to change.`})})},h={render:()=>(0,l.jsx)(s,{})},g=[`Default`,`Filled`,`Disabled`,`Error`,`CharacterCount`],d.parameters={...d.parameters,docs:{...d.parameters?.docs,source:{originalSource:`{}`,...d.parameters?.docs?.source}}},f.parameters={...f.parameters,docs:{...f.parameters?.docs,source:{originalSource:`{
+  args: {
+    defaultValue: 'I help teams diagnose tricky React rendering bugs and design maintainable TypeScript APIs.'
+  }
+}`,...f.parameters?.docs?.source}}},p.parameters={...p.parameters,docs:{...p.parameters?.docs,source:{originalSource:`{
+  args: {
+    disabled: true,
+    defaultValue: 'This introduction is being saved.'
+  }
+}`,...p.parameters?.docs?.source}}},m.parameters={...m.parameters,docs:{...m.parameters?.docs,source:{originalSource:`{
+  render: args => <FormField label="Reason for declining" required error="Add a comment so your mentor can revise the note.">{control => <Textarea {...args} {...control} placeholder="Explain what needs to change." />}</FormField>
+}`,...m.parameters?.docs?.source}}},h.parameters={...h.parameters,docs:{...h.parameters?.docs,source:{originalSource:`{
+  render: () => <CountedTextarea />
+}`,...h.parameters?.docs?.source}}}})))()}_();export{h as CharacterCount,d as Default,p as Disabled,m as Error,f as Filled,g as __namedExportsOrder,u as default};

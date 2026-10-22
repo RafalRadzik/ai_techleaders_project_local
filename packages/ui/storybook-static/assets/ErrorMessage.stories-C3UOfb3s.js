@@ -1,0 +1,5 @@
+import{n as e}from"./rolldown-runtime-DkW27tQK.js";import{n as t,t as n}from"./ErrorMessage-d1ijiphG.js";var r,i,a,o;function s(){return(s=e((()=>{t(),r={title:`Backend/Feedback/ErrorMessage`,component:n,tags:[`autodocs`],args:{message:`We could not load your sessions. Please try again.`}},i={},a={args:{message:`We could not confirm the payment status. Wait for confirmation before trying again; a connection error does not tell us whether the payment succeeded.`}},o=[`Default`,`LongMessage`],i.parameters={...i.parameters,docs:{...i.parameters?.docs,source:{originalSource:`{}`,...i.parameters?.docs?.source}}},a.parameters={...a.parameters,docs:{...a.parameters?.docs,source:{originalSource:`{
+  args: {
+    message: 'We could not confirm the payment status. Wait for confirmation before trying again; a connection error does not tell us whether the payment succeeded.'
+  }
+}`,...a.parameters?.docs?.source}}}})))()}s();export{i as Default,a as LongMessage,o as __namedExportsOrder,r as default};

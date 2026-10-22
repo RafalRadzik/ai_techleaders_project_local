@@ -8,7 +8,7 @@ w specyfikacji.
 
 - Przepływ: Epik 01, konta i role: logowanie GitHubem i mailem, rejestracja,
   weryfikacja maila, strony startowe ról (mentee, mentor, operator) i brak
-  dostępu. Historie #12, #13 i #14 (jeśli w .ai/specs/backlog.md mają inne
+  dostępu. Historie #20, #21 i #22 (jeśli w .ai/specs/backlog.md mają inne
   numery, użyj tamtych).
 - Brief: .ai/specs/product-brief.md
 - Backlog i specyfikacje: .ai/specs/backlog.md i specyfikacja Epiku 01

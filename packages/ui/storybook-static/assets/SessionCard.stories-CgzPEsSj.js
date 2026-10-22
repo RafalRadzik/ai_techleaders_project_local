@@ -1,0 +1,20 @@
+import{n as e}from"./rolldown-runtime-DkW27tQK.js";import{t}from"./react-BZJXY1be.js";import{t as n}from"./jsx-runtime-DeHZSEgm.js";import{r,t as i}from"./button-D0p5l_4u.js";import{i as a,n as o,r as s,t as c}from"./SessionCard-UVi3mLXN.js";function l(){let[e,t]=(0,u.useState)(!1);return(0,d.jsxs)(`div`,{className:`dm-product-stack`,children:[(0,d.jsx)(c,{title:`Your text session is confirmed`,description:`Alex Laurent: Wednesday, 9 September at 14:00 Europe/Warsaw`,createdAt:`2026-09-07T10:00:00Z`,timeLabel:`Just now`,href:`#session`,read:e,onMarkRead:()=>t(!0)}),(0,d.jsx)(c,{title:`Your written answer is ready`,description:`Read the answer from your session about API boundaries.`,createdAt:`2026-09-06T15:30:00Z`,timeLabel:`Yesterday`,href:`#answer`,read:!0,onMarkRead:()=>void 0})]})}var u,d,f,p,m,h,g,_,v,y;function b(){return(b=e((()=>{u=t(),r(),a(),d=n(),f={title:`Product/Sessions`,component:o,tags:[`autodocs`],args:{title:`A clearer boundary for your TypeScript API`,participant:`Alex Laurent`,startsAt:`2026-09-09T12:00:00Z`,dateLabel:`Wednesday, 9 September: 14:00`,timeZone:`Europe/Warsaw`,duration:25,state:`upcoming`,actions:(0,d.jsx)(i,{intent:`neutral`,appearance:`stroke`,children:`View session`})},parameters:{docs:{description:{component:`Session cards, header and notification for #23/#26. Every booking/session view states the text format. Session state, allowed navigation and channel access come from the application. No channel is chosen by this component (Q18).`}}}},p={},m={args:{state:`open`,actions:(0,d.jsx)(i,{children:`Open text session`})}},h={args:{state:`ended`,actions:(0,d.jsx)(i,{intent:`neutral`,appearance:`stroke`,children:`Read written answer`})}},g={args:{state:`cancelled`,actions:(0,d.jsx)(i,{intent:`neutral`,appearance:`stroke`,children:`View cancellation`})}},_={render:()=>(0,d.jsx)(s,{title:`A clearer boundary for your TypeScript API`,state:`open`,participants:`Alex Laurent and Jamie Chen`,schedule:`14:00–14:25 Europe/Warsaw`,notice:`This is a text session. Keep your question and relevant context in the agreed session channel.`,actions:(0,d.jsx)(i,{intent:`neutral`,appearance:`stroke`,children:`Session details`})})},v={render:()=>(0,d.jsx)(l,{})},y=[`Upcoming`,`InProgress`,`Past`,`Cancelled`,`Header`,`Notifications`],p.parameters={...p.parameters,docs:{...p.parameters?.docs,source:{originalSource:`{}`,...p.parameters?.docs?.source}}},m.parameters={...m.parameters,docs:{...m.parameters?.docs,source:{originalSource:`{
+  args: {
+    state: 'open',
+    actions: <Button>Open text session</Button>
+  }
+}`,...m.parameters?.docs?.source}}},h.parameters={...h.parameters,docs:{...h.parameters?.docs,source:{originalSource:`{
+  args: {
+    state: 'ended',
+    actions: <Button intent="neutral" appearance="stroke">Read written answer</Button>
+  }
+}`,...h.parameters?.docs?.source}}},g.parameters={...g.parameters,docs:{...g.parameters?.docs,source:{originalSource:`{
+  args: {
+    state: 'cancelled',
+    actions: <Button intent="neutral" appearance="stroke">View cancellation</Button>
+  }
+}`,...g.parameters?.docs?.source}}},_.parameters={..._.parameters,docs:{..._.parameters?.docs,source:{originalSource:`{
+  render: () => <SessionHeader title="A clearer boundary for your TypeScript API" state="open" participants="Alex Laurent and Jamie Chen" schedule="14:00–14:25 Europe/Warsaw" notice="This is a text session. Keep your question and relevant context in the agreed session channel." actions={<Button intent="neutral" appearance="stroke">Session details</Button>} />
+}`,..._.parameters?.docs?.source}}},v.parameters={...v.parameters,docs:{...v.parameters?.docs,source:{originalSource:`{
+  render: () => <NotificationsExample />
+}`,...v.parameters?.docs?.source}}}})))()}b();export{g as Cancelled,_ as Header,m as InProgress,v as Notifications,h as Past,p as Upcoming,y as __namedExportsOrder,f as default};

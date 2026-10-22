@@ -99,12 +99,27 @@ the reference example every new concept copies. See
 
 ### Scripts (run from the repo root)
 
+- `npm run setup` — one-command installer: `npm install`, `.env` from `.env.example`,
+  PostgreSQL available, migrations, seed. **Idempotent** — every step reports itself as
+  `ran` or `skipped`, an existing `.env` is never overwritten, and the dev server is
+  deliberately not started (`npm run dev` never exits). **Docker is a fallback, not a
+  requirement**: setup TCP-probes the configured address (`DATABASE_URL`, else
+  `DB_HOST`/`DB_PORT`, environment before `.env`) and reuses any PostgreSQL already
+  listening; Compose is only used when nothing answers. Implementation in
+  `scripts/setup/` (plain Node ESM, `node:*` built-ins only, so it runs on a fresh
+  clone) — pure decisions in `steps.mjs`, all I/O behind the injectable effects in
+  `effects.mjs`, ordering in `run.mjs`.
 - `npm run dev` — start the Next.js app (`@devmentor/app`).
 - `npm run build` / `npm run start` — production build / serve (force `NODE_ENV=production`).
 - `npm run typecheck` — `tsc --noEmit` across all packages.
 - `npm run lint` — ESLint (includes the dependency-direction rules).
 - `npm run test:unit` — run TypeScript unit tests with Vitest.
 - `npm run test:unit:coverage` — run unit tests and enforce per-file 100% coverage.
+- `npm run storybook` — build the prototype and start the local component catalogue.
+- `npm run build-storybook` — build the prototype and static component catalogue.
+- `npm run typecheck:storybook` — check catalogue configuration and examples.
+- `npm run prototype` — rebuild the preview from `prototypes/devmentor-journey/`.
+- `npm run typecheck:prototype` / `npm run test:prototype` — check prototype types and regressions.
 - `npm run test:integration` — create ephemeral PostgreSQL with Testcontainers,
   build/start the app, and run the agent-browser scenarios.
 - `npm run test:browser:install` — install agent-browser's Chrome runtime locally
@@ -119,8 +134,16 @@ the reference example every new concept copies. See
 - Copy `.env.example` to `.env`. `.env` is git-ignored; defaults match
   `docker-compose.yml` (`devmentor` / `devmentor` / `devmentor`).
 - All env access funnels through zod schemas — `@devmentor/core` (`config/env.ts`) for
-  the app, `@devmentor/db` (`env.ts`) for the MikroORM CLI. **Nothing else reads
-  `process.env` directly.**
+  the app, `@devmentor/db` (`env.ts`) for the MikroORM CLI. **Nothing under `packages/`
+  reads `process.env` directly.** There are exactly two documented exceptions, both
+  outside `packages/`:
+  - `tests/integration/environment.ts` — inherits the parent environment to pass
+    ephemeral test configuration to migration/build/app child processes.
+  - `scripts/setup/effects.mjs` — `npm run setup` runs on a fresh clone *before*
+    `npm install`, so it cannot import zod. It reads `process.env`, `process.version`,
+    and `process.platform` behind the injectable `SetupEffects` adapter, and
+    re-implements the `DATABASE_URL`-over-`DB_*` precedence in `steps.mjs`
+    (`resolveDatabaseTarget`). Keep that precedence in step with the two zod schemas.
 
 ### Conventions & gotchas (learned the hard way — see `.ai/lessons.md`)
 
@@ -156,6 +179,33 @@ the reference example every new concept copies. See
 - **Collection routes are non-dynamic**, so Next passes no `params` — CRUD helpers
   guard `ctx.params` before reading it.
 
+### Design-system rules confirmed by the user
+
+- Form footer actions align right, with the secondary/Cancel action before the
+  primary submit action in DOM and visual order. Authentication actions span the
+  field width; provider alternatives use neutral styling and back navigation is
+  visually separate. Preserve this order when actions wrap on mobile.
+
+- Read `packages/ui/.storybook/Guidelines.mdx` before composing screens.
+  Use clear visual hierarchy, comfortable reading widths and generous
+  paragraph/component spacing; long prose may use 16px/28px while controls retain
+  the compact DS scale.
+- Present short comparable facts, such as a session length and its allowed price
+  range, as separate neutral, noninteractive chips. Keep units/currency explicit
+  and allow chips to wrap on mobile.
+- Homepage feature chips use generous padding, semibold blue labels and decorative
+  icons. Keep this emphasis distinct from neutral metadata and semantic statuses.
+- Write visible copy in direct, specific language using the humanizer skill.
+  Avoid generic promises and theatrical slogans; preserve product facts and useful
+  validation/recovery instructions. Keep the current UI language unless requested.
+- Never use dots, middle dots or bullet dots as inline metadata separators.
+  Separate facts with spacing, new lines or chips. Normal sentence punctuation
+  remains allowed. The reusable examples live in Storybook's usage guidelines.
+- The DevMentor wordmark uses bundled DM Mono; ordinary UI text stays in Inter.
+  The blue four-point star is the favicon. Technology chips retain text labels
+  alongside decorative icons. Mentor ratings and reviews are included as
+  presentational DS components; persistence and eligibility belong to the backend.
+
 ## Testing requirements
 
 - **Every new feature must have unit tests covering 100% of its new or changed
@@ -180,10 +230,11 @@ the reference example every new concept copies. See
   live accessibility tree first, assert semantic roles/text rather than guessed CSS,
   capture screenshots at key assertions, and close each isolated session in
   `finally`.
-- The integration harness under `tests/integration/` is the sole exception to the
-  direct-environment-access rule: `environment.ts` may inherit the parent process
-  environment only to pass ephemeral test configuration to migration/build/app child
-  processes. Application and package source must still use the zod config modules.
+- The integration harness under `tests/integration/` is one of the two exceptions to
+  the direct-environment-access rule (the other is `scripts/setup/` — see
+  Configuration above): `environment.ts` may inherit the parent process environment
+  only to pass ephemeral test configuration to migration/build/app child processes.
+  Application and package source must still use the zod config modules.
 
 GitHub Actions runs Build, Lint, Unit tests, and Integration tests independently on
 every pull request. A workflow result becomes merge-blocking only when the repository
@@ -283,3 +334,14 @@ behind.
    searches, multi-file reads, and independent parallel work into subagents and keep
    only their conclusions in the main thread. A clean context window is a
    correctness feature, not just a cost saving.
+
+6. **Work locally; obtain explicit permission before any remote write.** Prepare
+   and review changes locally. Never push commits, create or update remote PRs or
+   issues, publish/deploy artifacts, or write changes to Figma or another external
+   service without the user's explicit approval for that action. Read-only remote
+   research remains allowed. A request to build or edit something locally is not
+   approval to publish it.
+7. **Keep session materials out of commits.** Run logs, local PR drafts, working
+   references and generated previews stay local. Review the staged file list and
+   commit only the requested project deliverables and their required source,
+   tests and documentation.

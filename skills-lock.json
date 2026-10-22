@@ -216,12 +216,6 @@
       "sourceType": "github",
       "skillPath": "skills/om-verify-in-repo/SKILL.md",
       "computedHash": "0151f3c61d7abac2d98e6fb5c9150d523b36e74ea32d10a5560b4df368aec50b"
-    },
-    "om-setup-discovery-pipeline": {
-      "source": "open-mercato/skills",
-      "sourceType": "github",
-      "skillPath": "skills/om-setup-discovery-pipeline/SKILL.md",
-      "computedHash": "5e4d615293e4da24615adb6ddb384802bc1b2381c360b890984bdc0ed77b1eea"
     }
   }
 }

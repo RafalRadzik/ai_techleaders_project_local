@@ -1,9 +1,8 @@
 import { jwtVerify, SignJWT } from 'jose';
 import type { AppEnv } from '../../config/env';
-import { BadRequestError, ServiceUnavailableError } from '../../http/errors';
+import { BadRequestError } from '../../http/errors';
 import type { Clock } from '../../time/clock';
-
-const ALGORITHM = 'HS256';
+import { JWT_ALGORITHM as ALGORITHM, signingKeys } from './signing-keys';
 
 export interface SignPurposeTokenInput {
   /** Becomes the JWT `aud`; the verifier must name the same purpose. */
@@ -77,12 +76,6 @@ export class TokenService {
 
   /** Current secret first (used to sign), then the previous one (verify only). */
   private keys(): [Uint8Array, ...Uint8Array[]] {
-    const { SESSION_SECRET, SESSION_SECRET_PREVIOUS } = this.env;
-    if (!SESSION_SECRET) {
-      throw new ServiceUnavailableError('Token signing is not configured');
-    }
-    const encoder = new TextEncoder();
-    const current = encoder.encode(SESSION_SECRET);
-    return SESSION_SECRET_PREVIOUS ? [current, encoder.encode(SESSION_SECRET_PREVIOUS)] : [current];
+    return signingKeys(this.env, 'Token signing is not configured');
   }
 }

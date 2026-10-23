@@ -3,6 +3,13 @@ export { createLogger, type Logger } from './logger';
 export { systemClock, type Clock } from './time/clock';
 export { getContainer, withScope, type Cradle } from './container/index';
 export {
+  readSessionCookie,
+  SESSION_COOKIE_NAME,
+  SessionService,
+  type IssuedSession,
+  type SessionClaims,
+} from './services/auth/session.service';
+export {
   TokenService,
   type PurposeTokenClaims,
   type SignPurposeTokenInput,

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { SessionService } from '../services/auth/session.service';
 import { TokenService } from '../services/auth/token.service';
 import { systemClock } from '../time/clock';
 import type { AppEnv, RawEnv } from '../config/env';
@@ -66,6 +67,19 @@ describe('getContainer', () => {
     await expect(tokenService.verifyPurposeToken(token, 'email-verification')).resolves.toEqual({
       subject: 'u1',
     });
+  });
+
+  it('registers the session service as a singleton wired to env and clock', async () => {
+    envState.overrides = { SESSION_SECRET: 's'.repeat(32) };
+    const container = await getContainer();
+    const { sessionService } = container.cradle;
+    expect(sessionService).toBeInstanceOf(SessionService);
+    expect(container.createScope().cradle.sessionService).toBe(sessionService);
+
+    const { cookie, expiresAt } = await sessionService.issue({ id: 'u1', sessionVersion: 0 });
+    expect(expiresAt.getTime()).toBeGreaterThan(Date.now());
+    const token = cookie.split(';')[0]?.slice('devmentor_session='.length) ?? '';
+    await expect(sessionService.verify(token)).resolves.toEqual({ userId: 'u1', sessionVersion: 0 });
   });
 
   it('logs auth.user.created through the default subscriber', async () => {

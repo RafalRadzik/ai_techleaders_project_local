@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { systemClock } from '../time/clock';
+import type { AppEnv, RawEnv } from '../config/env';
 
 const fork = vi.fn(() => ({ forked: true }));
 const orm = { em: { fork } };
@@ -9,11 +10,19 @@ const logger = { info: vi.fn(), error: vi.fn() };
 vi.mock('@devmentor/db', () => ({ getOrm: vi.fn(async () => orm), User: class {} }));
 vi.mock('../logger', () => ({ createLogger: () => logger }));
 
+// Drive the env the container sees per test without resetting the module registry.
+const envState = vi.hoisted(() => ({ overrides: {} as RawEnv }));
+vi.mock('../config/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../config/env')>();
+  return { ...actual, getEnv: (): AppEnv => actual.parseAppEnv(envState.overrides) };
+});
+
 const { getContainer, withScope } = await import('./container');
 
 const globalForContainer = globalThis as { __devmentorContainer?: unknown };
 
 beforeEach(() => {
+  envState.overrides = {};
   delete globalForContainer.__devmentorContainer;
   fork.mockClear();
   logger.info.mockClear();
@@ -45,6 +54,27 @@ describe('getContainer', () => {
     const { cradle } = await getContainer();
     await cradle.eventBus.emit('auth.user.created', { userId: 'u1', email: 'u1@example.com' });
     expect(logger.info).toHaveBeenCalledWith({ userId: 'u1' }, 'auth.user.created');
+  });
+});
+
+describe('production config check', () => {
+  it('throws on first creation in production without SESSION_SECRET', async () => {
+    envState.overrides = { NODE_ENV: 'production' };
+    await expect(getContainer()).rejects.toThrow(
+      'SESSION_SECRET must be set when NODE_ENV=production',
+    );
+  });
+
+  it('builds in production when SESSION_SECRET is set', async () => {
+    envState.overrides = { NODE_ENV: 'production', SESSION_SECRET: 's'.repeat(32) };
+    const { cradle } = await getContainer();
+    expect(cradle.env.SESSION_SECRET).toBe('s'.repeat(32));
+  });
+
+  it('builds in development without SESSION_SECRET', async () => {
+    envState.overrides = { NODE_ENV: 'development' };
+    const { cradle } = await getContainer();
+    expect(cradle.env.SESSION_SECRET).toBeUndefined();
   });
 });
 

@@ -111,6 +111,30 @@ Then open:
 The app **builds and boots even with no database running**; DB-backed pages degrade
 to a visible "unavailable" state instead of crashing.
 
+### Configuration
+
+All variables are validated by the zod schema in `packages/core/src/config/env.ts`;
+`.env.example` documents each one. Beyond the app and database settings above, auth
+and email use:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `APP_URL` | `http://localhost:3000` | Public base URL for OAuth callbacks and email links. |
+| `SESSION_SECRET` | unset | Signs session cookies; at least 32 characters (`openssl rand -base64 48`). **Required in production:** the app refuses to serve without it. Without it in development, sign-in fails closed. |
+| `SESSION_SECRET_PREVIOUS` | unset | Previous secret, still accepted while rotating. At least 32 characters. |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | unset | GitHub OAuth app. When unset, GitHub sign-in fails closed; the app still boots. |
+| `OPERATOR_EMAILS` | empty | Comma-separated operator allowlist, trimmed and case-insensitive. |
+| `TRUSTED_PROXY_HOPS` | `0` | Number of reverse proxies whose `X-Forwarded-For` entries are trusted. |
+| `MAILER_ADAPTER` | unset | `resend` or `log`. Email ships with E01 Slice 4; then an unset adapter in development writes mail to the log. |
+| `MAIL_API_KEY`, `MAIL_FROM` | unset | Resend API key and sender address. |
+| `AUTH_IDENTITY_ADAPTER` | `github` | `github` or `mock`. |
+| `INTEGRATION_TEST_RUN` | unset | `1` only inside the integration harness. |
+
+`AUTH_IDENTITY_ADAPTER=mock` and `MAILER_ADAPTER=log` are test adapters: the app
+refuses to start when either is set without `INTEGRATION_TEST_RUN=1`. The integration
+harness sets all three, plus a throwaway `SESSION_SECRET` and
+`OPERATOR_EMAILS=mock-operator@devmentor.test`.
+
 ## Scripts
 
 | Command | Description |

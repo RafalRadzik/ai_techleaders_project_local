@@ -29,7 +29,16 @@ export {
   type GithubIdentity,
   type GithubIdentityPort,
 } from './services/auth/github-identity.port';
-export { UserService, type UserDto } from './services/auth/user.service';
+export {
+  AccountNotLinkedError,
+  LastRoleError,
+  UserService,
+  type AccountNotLinkedReason,
+  type AssignableRole,
+  type GithubSignIn,
+  type RoleChange,
+  type UserDto,
+} from './services/auth/user.service';
 export { EventBus, type EventHandler, type EventId, type EventMap } from './events/index';
 export { userCreateSchema, type UserCreateInput } from './validators/auth/user-create.schema';
 

@@ -87,6 +87,9 @@ async function build(): Promise<AwilixContainer<Cradle>> {
   container.cradle.eventBus.on('auth.user.created', ({ userId }) => {
     container.cradle.logger.info({ userId }, 'auth.user.created');
   });
+  container.cradle.eventBus.on('auth.user.roles_changed', ({ userId, roles, previousRoles }) => {
+    container.cradle.logger.info({ userId, roles, previousRoles }, 'auth.user.roles_changed');
+  });
 
   return container;
 }

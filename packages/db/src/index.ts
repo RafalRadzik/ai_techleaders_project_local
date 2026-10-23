@@ -8,6 +8,8 @@ export { getDbEnv, type DbEnv } from './env';
 // `db` depends on `@mikro-orm/*` directly.
 export {
   EntityRepository,
+  LockMode,
+  UniqueConstraintViolationException,
   type FilterQuery,
   type Loaded,
   type RequiredEntityData,

@@ -1,5 +1,6 @@
-import { User, USER_ROLES } from '@devmentor/db';
+import { User } from '@devmentor/db';
 import type { Cradle } from '../container/cradle';
+import { isOperatorEligible, ROLE_ORDER, type Role } from '../services/auth/roles';
 import { readSessionCookie } from '../services/auth/session.service';
 import { ForbiddenError, UnauthorizedError } from './errors';
 
@@ -9,8 +10,8 @@ import { ForbiddenError, UnauthorizedError } from './errors';
  * `packages/app/src/lib/`.
  */
 
-/** The fixed role set — a §2/§7 compatibility surface. Mirrors `@devmentor/db`'s `UserRole`. */
-export type Role = 'mentee' | 'mentor' | 'operator';
+/** The fixed role set; defined beside the role helpers in `services/auth/roles`. */
+export type { Role };
 
 /**
  * A live, verified session. `roles` is the stored set with `operator` resolved against
@@ -26,9 +27,6 @@ export type SessionCradle = Pick<Cradle, 'env' | 'em' | 'sessionService'>;
 
 /** Header `apiCall` sends on every request; required on every mutating `/api/*` call. */
 export const CSRF_HEADER_NAME = 'x-devmentor-request';
-
-/** Canonical role order; also proves at compile time that `Role` covers `UserRole`. */
-const ROLE_ORDER: readonly Role[] = USER_ROLES;
 
 interface StoredUser {
   id: string;
@@ -51,8 +49,7 @@ function effectiveRoles(user: StoredUser, operatorEmails: readonly string[]): Se
     // Corrupt despite the CHECK: an internal error (500), never a 401 sign-in loop.
     throw new Error(`users.roles is empty for user ${user.id}`);
   }
-  const isOperator =
-    user.emailVerifiedAt != null && operatorEmails.includes(user.email.toLowerCase());
+  const isOperator = isOperatorEligible(user, operatorEmails);
   const roles = ROLE_ORDER.filter((role) =>
     role === 'operator' ? isOperator : user.roles.includes(role),
   );

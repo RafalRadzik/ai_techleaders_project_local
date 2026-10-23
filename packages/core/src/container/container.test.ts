@@ -105,6 +105,13 @@ describe('getContainer', () => {
     await cradle.eventBus.emit('auth.user.created', { userId: 'u1', email: 'u1@example.com' });
     expect(logger.info).toHaveBeenCalledWith({ userId: 'u1' }, 'auth.user.created');
   });
+
+  it('logs auth.user.roles_changed through the default subscriber', async () => {
+    const { cradle } = await getContainer();
+    const change = { userId: 'u1', roles: ['mentee' as const], previousRoles: ['mentee' as const, 'operator' as const] };
+    await cradle.eventBus.emit('auth.user.roles_changed', change);
+    expect(logger.info).toHaveBeenCalledWith(change, 'auth.user.roles_changed');
+  });
 });
 
 describe('identity adapter selection', () => {

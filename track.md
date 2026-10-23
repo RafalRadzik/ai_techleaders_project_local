@@ -52,7 +52,7 @@ Each phase ends with a manual-test checkpoint; the next phase starts only after 
 - [x] 5.3 Rate limiter + `TooManyRequestsError` + `AuthRateLimit` entity/migration (step 23)
 - [x] 5.4 Mailer port + Resend/log adapters + `waitForMail` (step 24)
 - [x] 5.5 Email verification service (step 25)
-- [ ] 5.6 `register` / `login` schemas (step 26)
+- [x] 5.6 `register` / `login` schemas (step 26)
 - [ ] 5.7 `registerWithPassword` / `authenticateWithPassword` (step 27)
 - [ ] 5.8 Routes, `CrudForm` password field, `/register` page, enable email form on `/sign-in`, integration (step 28)
 

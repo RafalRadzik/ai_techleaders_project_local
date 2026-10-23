@@ -69,6 +69,8 @@ export default defineConfig({
         'packages/core/src/services/notifications/adapters/resend-mailer.ts',
         'packages/core/src/services/notifications/mailer.port.ts',
         'packages/core/src/time/clock.ts',
+        'packages/core/src/validators/auth/login.schema.ts',
+        'packages/core/src/validators/auth/register.schema.ts',
         'packages/db/src/config.ts',
         'packages/db/src/entities/auth/rate-limit.entity.ts',
         'packages/db/src/entities/auth/user.entity.ts',

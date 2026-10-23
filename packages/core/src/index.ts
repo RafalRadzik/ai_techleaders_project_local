@@ -80,6 +80,14 @@ export {
 } from './services/auth/sign-in-redirect';
 export type { Mailer, MailMessage } from './services/notifications/mailer.port';
 export { homeFor, liveRoles } from './services/auth/roles';
+export {
+  DISPLAY_NAME_MAX_LENGTH,
+  PASSWORD_MAX_BYTES,
+  PASSWORD_MIN_LENGTH,
+  registerSchema,
+  type RegisterInput,
+} from './validators/auth/register.schema';
+export { loginSchema, type LoginInput } from './validators/auth/login.schema';
 export { EventBus, type EventHandler, type EventId, type EventMap } from './events/index';
 
 // Reusable HTTP layer (typed errors, route wrappers, auth guards).

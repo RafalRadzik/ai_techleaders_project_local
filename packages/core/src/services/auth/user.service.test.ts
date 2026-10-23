@@ -279,6 +279,7 @@ describe('UserService.findOrCreateFromGithub — matching', () => {
       user: expect.objectContaining({ id: 'u1', email: FOUNDER, githubLogin: 'octo-renamed' }),
       sessionVersion: 3,
       created: false,
+      effectiveRoles: ['mentee'],
     });
     expect(linked.email).toBe(FOUNDER);
     expect(linked.avatarUrl).toBe('https://avatars.example/octo.png');
@@ -354,6 +355,7 @@ describe('UserService.findOrCreateFromGithub — matching', () => {
       user: expect.objectContaining({ id: 'new-1', roles: ['mentee'], mentorProfile: null }),
       sessionVersion: 0,
       created: true,
+      effectiveRoles: ['mentee'],
     });
     expect(eventNames(eventBus)).toEqual(['auth.user.created']);
     expect(eventBus.emit).toHaveBeenCalledWith('auth.user.created', {
@@ -627,5 +629,57 @@ describe('UserService.grantRole / revokeRole', () => {
   it('throws NotFoundError for an unknown user', async () => {
     const { service } = makeService(em);
     await expect(service.grantRole('missing', 'mentor')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('UserService.findOrCreateFromGithub — effective roles', () => {
+  it('resolves operator live for the session the callback will issue', async () => {
+    em = fakeEm([row({ id: 'u1', email: FOUNDER, githubId: '1001', roles: ['mentor'] })]);
+    const { service } = makeService(em, [FOUNDER]);
+
+    const result = await service.findOrCreateFromGithub(identity());
+
+    expect(result.effectiveRoles).toEqual(['mentor', 'operator']);
+  });
+
+  it('is empty for an operator-only row removed from the allowlist', async () => {
+    em = fakeEm([row({ id: 'u1', email: FOUNDER, githubId: '1001', roles: ['operator'] })]);
+    const { service } = makeService(em, []);
+
+    const result = await service.findOrCreateFromGithub(identity());
+
+    expect(result.user.roles).toEqual(['operator']);
+    expect(result.effectiveRoles).toEqual([]);
+  });
+});
+
+describe('UserService.signOut', () => {
+  it('bumps sessionVersion for a live session, under the row lock', async () => {
+    const ada = row({ id: 'u1', email: 'ada@example.com' });
+    em = fakeEm([ada]);
+    const { service } = makeService(em);
+
+    await expect(service.signOut({ userId: 'u1', sessionVersion: 3 })).resolves.toBe(true);
+
+    expect(ada.sessionVersion).toBe(4);
+    expect(em.findOne).toHaveBeenCalledWith(
+      User,
+      { id: 'u1' },
+      { lockMode: LockMode.PESSIMISTIC_WRITE },
+    );
+  });
+
+  it('changes nothing for a stale session version', async () => {
+    const ada = row({ id: 'u1', email: 'ada@example.com' });
+    em = fakeEm([ada]);
+    const { service } = makeService(em);
+
+    await expect(service.signOut({ userId: 'u1', sessionVersion: 2 })).resolves.toBe(false);
+    expect(ada.sessionVersion).toBe(3);
+  });
+
+  it('changes nothing for an unknown user', async () => {
+    const { service } = makeService(em);
+    await expect(service.signOut({ userId: 'missing', sessionVersion: 0 })).resolves.toBe(false);
   });
 });

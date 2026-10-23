@@ -40,6 +40,26 @@ export {
   type UserCreateInput,
   type UserDto,
 } from './services/auth/user.service';
+export {
+  clearOauthStateCookie,
+  createOauthState,
+  OAUTH_STATE_COOKIE_NAME,
+  OAUTH_STATE_COOKIE_PATH,
+  OAUTH_STATE_PURPOSE,
+  OAUTH_STATE_TTL_SECONDS,
+  verifyOauthState,
+  type OauthState,
+  type OauthStateDeps,
+} from './services/auth/oauth-state';
+export {
+  SIGN_IN_CANCELLED_LOCATION,
+  SIGN_IN_ERRORS,
+  SIGN_IN_PATH,
+  signInErrorLocation,
+  signInFailure,
+  type SignInError,
+} from './services/auth/sign-in-redirect';
+export { homeFor, liveRoles } from './services/auth/roles';
 export { EventBus, type EventHandler, type EventId, type EventMap } from './events/index';
 
 // Reusable HTTP layer (typed errors, route wrappers, auth guards).

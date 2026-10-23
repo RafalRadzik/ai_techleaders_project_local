@@ -13,6 +13,12 @@ export {
 } from './errors';
 export { safeReturnTo } from './return-to';
 export {
+  readCookie,
+  redirectResponse,
+  serializeCookie,
+  type CookieAttributes,
+} from './cookies';
+export {
   fetchJson,
   DEFAULT_OUTBOUND_TIMEOUT_MS,
   type FetchJsonInit,

@@ -12,8 +12,10 @@ import { ConflictError, NotFoundError, UnauthorizedError } from '../../http/erro
 import type { Logger } from '../../logger';
 import type { Clock } from '../../time/clock';
 import type { GithubIdentity } from './github-identity.port';
+import type { SessionClaims } from './session.service';
 import {
   isOperatorEligible,
+  liveRoles,
   normalizeRoles,
   reconcileOperatorRoles,
   sameRoles,
@@ -54,6 +56,12 @@ export interface GithubSignIn {
   sessionVersion: number;
   /** `true` only when this call created the row. */
   created: boolean;
+  /**
+   * The roles the new session will hold: `operator` resolved live, as `requireSession`
+   * resolves it. Empty only for an operator-only row no longer on the allowlist, which
+   * has no authority to sign in with; the callback refuses it.
+   */
+  effectiveRoles: Role[];
 }
 
 /** A grant or revoke result: what the route needs to re-issue the caller's cookie. */
@@ -240,7 +248,12 @@ export class UserService {
       await this.eventBus.emit('auth.user.created', { userId: user.id, email: user.email });
     }
     await this.emitRolesChanged(rolesChanged);
-    return { user: toUserDto(user), sessionVersion: user.sessionVersion, created };
+    return {
+      user: toUserDto(user),
+      sessionVersion: user.sessionVersion,
+      created,
+      effectiveRoles: liveRoles(user.roles, isOperatorEligible(user, this.env.OPERATOR_EMAILS)),
+    };
   }
 
   /**
@@ -276,6 +289,25 @@ export class UserService {
       const next = roles.filter((held) => held !== role);
       if (next.length === 0) throw new LastRoleError();
       return next;
+    });
+  }
+
+  /**
+   * Revoke the signed-in session behind `claims` by bumping `sessionVersion` — sign-out is
+   * a trigger on the closed list. Only a *live* session is revoked: an unknown user or a
+   * stale version changes nothing. The comparison runs under the row lock, so two
+   * concurrent sign-outs bump once. Returns whether a bump happened.
+   */
+  async signOut(claims: SessionClaims): Promise<boolean> {
+    return this.em.transactional(async (em) => {
+      const user = await em.findOne(
+        User,
+        { id: claims.userId },
+        { lockMode: LockMode.PESSIMISTIC_WRITE },
+      );
+      if (!user || user.sessionVersion !== claims.sessionVersion) return false;
+      user.sessionVersion += 1;
+      return true;
     });
   }
 

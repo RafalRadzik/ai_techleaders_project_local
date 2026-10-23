@@ -53,3 +53,32 @@ export function reconcileOperatorRoles(stored: readonly string[], eligible: bool
   if (eligible) return normalizeRoles([...others, 'operator']);
   return others.length > 0 ? others : normalizeRoles(stored);
 }
+
+/**
+ * Effective roles from a stored set: `mentee`/`mentor` as stored, `operator` only while
+ * `operatorEligible` — never from the stored member, which is a cache. Canonical order,
+ * duplicate-free; empty for an operator-only row that is no longer eligible.
+ */
+export function liveRoles(stored: readonly string[], operatorEligible: boolean): Role[] {
+  return ROLE_ORDER.filter((role) =>
+    role === 'operator' ? operatorEligible : stored.includes(role),
+  );
+}
+
+/** Where each role lands by default, in priority order (`operator` first). */
+const ROLE_HOMES: ReadonlyArray<readonly [Role, string]> = [
+  ['operator', '/admin'],
+  ['mentor', '/mentor'],
+];
+
+/** Landing page for a user holding no higher-priority role. */
+const MENTEE_HOME = '/home';
+
+/**
+ * The single place the default landing is decided: `operator → /admin`, then
+ * `mentor → /mentor`, then `/home`. Pass *effective* roles (operator resolved live).
+ */
+export function homeFor(roles: readonly [Role, ...Role[]]): string {
+  const home = ROLE_HOMES.find(([role]) => roles.includes(role));
+  return home ? home[1] : MENTEE_HOME;
+}

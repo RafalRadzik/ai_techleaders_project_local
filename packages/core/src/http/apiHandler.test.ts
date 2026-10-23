@@ -35,6 +35,16 @@ describe('jsonOk / jsonError', () => {
     expect(jsonOk(null, 201).status).toBe(201);
   });
 
+  it('adds extra headers but never lets them override the JSON content type', async () => {
+    const response = jsonOk(null, 200, {
+      'set-cookie': 'devmentor_session=; Max-Age=0',
+      'content-type': 'text/html',
+    });
+    expect(response.headers.get('set-cookie')).toBe('devmentor_session=; Max-Age=0');
+    expect(response.headers.get('content-type')).toBe('application/json');
+    expect(await response.json()).toEqual({ ok: true, data: null });
+  });
+
   it('omits fieldErrors when there are none', async () => {
     const response = jsonError(404, 'not_found', 'Missing');
     expect(await response.json()).toEqual({

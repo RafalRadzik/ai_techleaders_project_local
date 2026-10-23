@@ -1,6 +1,6 @@
 import { User } from '@devmentor/db';
 import type { Cradle } from '../container/cradle';
-import { isOperatorEligible, ROLE_ORDER, type Role } from '../services/auth/roles';
+import { isOperatorEligible, liveRoles, type Role } from '../services/auth/roles';
 import { readSessionCookie } from '../services/auth/session.service';
 import { ForbiddenError, UnauthorizedError } from './errors';
 
@@ -49,10 +49,7 @@ function effectiveRoles(user: StoredUser, operatorEmails: readonly string[]): Se
     // Corrupt despite the CHECK: an internal error (500), never a 401 sign-in loop.
     throw new Error(`users.roles is empty for user ${user.id}`);
   }
-  const isOperator = isOperatorEligible(user, operatorEmails);
-  const roles = ROLE_ORDER.filter((role) =>
-    role === 'operator' ? isOperator : user.roles.includes(role),
-  );
+  const roles = liveRoles(user.roles, isOperatorEligible(user, operatorEmails));
   if (!isNonEmpty(roles)) {
     // An operator-only row removed from the allowlist holds no authority. Not a 401
     // (signing in again would loop) and no invented fallback role.

@@ -1,5 +1,6 @@
 import { jwtVerify, SignJWT } from 'jose';
 import type { AppEnv } from '../../config/env';
+import { readCookie, serializeCookie } from '../../http/cookies';
 import type { Clock } from '../../time/clock';
 import { JWT_ALGORITHM, signingKeys } from './signing-keys';
 
@@ -39,15 +40,7 @@ function isSessionVersion(value: unknown): value is number {
  * and even then only the live check in `requireSession` authorizes anything.
  */
 export function readSessionCookie(cookieHeader: string | null | undefined): string | null {
-  if (!cookieHeader) return null;
-  for (const pair of cookieHeader.split(';')) {
-    const separator = pair.indexOf('=');
-    if (separator === -1) continue;
-    if (pair.slice(0, separator).trim() !== SESSION_COOKIE_NAME) continue;
-    const value = pair.slice(separator + 1).trim();
-    return value || null;
-  }
-  return null;
+  return readCookie(cookieHeader, SESSION_COOKIE_NAME);
 }
 
 /**
@@ -121,16 +114,12 @@ export class SessionService {
 
   /** Hand-rolled `Set-Cookie` serialisation; the JWT is base64url, so no encoding is needed. */
   private serialize(value: string, maxAgeSeconds: number, expires: Date): string {
-    const attributes = [
-      `${SESSION_COOKIE_NAME}=${value}`,
-      'Path=/',
-      `Max-Age=${maxAgeSeconds}`,
-      `Expires=${expires.toUTCString()}`,
-      'HttpOnly',
-      'SameSite=Lax',
-    ];
-    if (this.env.NODE_ENV === 'production') attributes.push('Secure');
-    return attributes.join('; ');
+    return serializeCookie(SESSION_COOKIE_NAME, value, {
+      path: '/',
+      maxAgeSeconds,
+      expires,
+      secure: this.env.NODE_ENV === 'production',
+    });
   }
 
   private keys(): [Uint8Array, ...Uint8Array[]] {

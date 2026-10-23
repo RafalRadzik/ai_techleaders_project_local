@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  homeFor,
   isOperatorEligible,
+  liveRoles,
   normalizeRoles,
   reconcileOperatorRoles,
   ROLE_ORDER,
@@ -74,5 +76,28 @@ describe('reconcileOperatorRoles', () => {
 
   it('keeps a stale operator rather than empty an operator-only set', () => {
     expect(reconcileOperatorRoles(['operator', 'operator'], false)).toEqual(['operator']);
+  });
+});
+
+describe('liveRoles', () => {
+  it('keeps stored mentee/mentor and takes operator only from eligibility', () => {
+    expect(liveRoles(['mentor', 'mentee', 'mentor'], false)).toEqual(['mentee', 'mentor']);
+    expect(liveRoles(['mentee'], true)).toEqual(['mentee', 'operator']);
+    expect(liveRoles(['mentee', 'operator'], false)).toEqual(['mentee']);
+  });
+
+  it('is empty for an operator-only row that is no longer eligible', () => {
+    expect(liveRoles(['operator'], false)).toEqual([]);
+  });
+});
+
+describe('homeFor', () => {
+  it('lands by priority: operator, then mentor, then mentee', () => {
+    expect(homeFor(['mentee'])).toBe('/home');
+    expect(homeFor(['mentor'])).toBe('/mentor');
+    expect(homeFor(['mentee', 'mentor'])).toBe('/mentor');
+    expect(homeFor(['operator'])).toBe('/admin');
+    expect(homeFor(['mentor', 'operator'])).toBe('/admin');
+    expect(homeFor(['mentee', 'mentor', 'operator'])).toBe('/admin');
   });
 });

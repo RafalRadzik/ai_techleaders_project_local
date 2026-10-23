@@ -38,19 +38,18 @@ function logger(): Logger {
   return (cachedLogger ??= createLogger());
 }
 
-function json(
-  status: number,
-  body: ApiResponseBody<unknown>,
-  headers?: Record<string, string>,
-): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...headers, 'content-type': 'application/json' },
-  });
+function json(status: number, body: ApiResponseBody<unknown>, headers?: HeadersInit): Response {
+  const merged = new Headers(headers);
+  merged.set('content-type', 'application/json');
+  return new Response(JSON.stringify(body), { status, headers: merged });
 }
 
-export function jsonOk<T>(data: T, status = 200): Response {
-  return json(status, { ok: true, data });
+/**
+ * The success envelope. `headers` lets a route return it with extra headers — e.g. the
+ * logout route's expiring `Set-Cookie` — by returning this `Response` from its logic.
+ */
+export function jsonOk<T>(data: T, status = 200, headers?: HeadersInit): Response {
+  return json(status, { ok: true, data }, headers);
 }
 
 export function jsonError(

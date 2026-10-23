@@ -20,6 +20,15 @@ export {
   type PurposeTokenClaims,
   type SignPurposeTokenInput,
 } from './services/auth/token.service';
+export {
+  GITHUB_CALLBACK_PATH,
+  GITHUB_LOGIN_PATTERN,
+  githubCallbackUrl,
+  NoVerifiedEmailError,
+  type AuthorizeUrlInput,
+  type GithubIdentity,
+  type GithubIdentityPort,
+} from './services/auth/github-identity.port';
 export { UserService, type UserDto } from './services/auth/user.service';
 export { EventBus, type EventHandler, type EventId, type EventMap } from './events/index';
 export { userCreateSchema, type UserCreateInput } from './validators/auth/user-create.schema';

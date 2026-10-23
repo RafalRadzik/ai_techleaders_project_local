@@ -27,7 +27,7 @@ Each phase ends with a manual-test checkpoint; the next phase starts only after 
 
 ## Phase 3 — GitHub sign-in and data protection (Slice 2, steps 10–17)
 
-- [ ] 3.1 GitHub identity port + real and mock adapters + container selection (step 11)
+- [x] 3.1 GitHub identity port + real and mock adapters + container selection (step 11)
 - [ ] 3.2 `findOrCreateFromGithub` with race handling, operator reconciliation, `grantRole`/`revokeRole`, `UserDto` fields (steps 10, 12)
 - [ ] 3.3 Remove `POST /api/users` + `userCreateSchema`; operator-guard `GET` at route and service (step 13)
 - [ ] 3.4 Auth routes: `/api/auth/github`, `/callback`, `/logout` (step 14)

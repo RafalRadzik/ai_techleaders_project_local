@@ -11,6 +11,9 @@ import { getEnv, type AppEnv } from '../config/env';
 import { bindSessionScope, loadSession } from '../http/auth';
 import { createLogger } from '../logger';
 import { EventBus } from '../events/event-bus';
+import { GithubIdentityAdapter } from '../services/auth/adapters/github-identity';
+import { MockGithubIdentityAdapter } from '../services/auth/adapters/mock-github-identity';
+import type { GithubIdentityPort } from '../services/auth/github-identity.port';
 import { readSessionCookie, SessionService } from '../services/auth/session.service';
 import { TokenService } from '../services/auth/token.service';
 import { UserService } from '../services/auth/user.service';
@@ -37,6 +40,19 @@ function assertProductionConfig(env: AppEnv): void {
   }
 }
 
+/**
+ * The real GitHub adapter unless both fake signals are present (B14). The env schema
+ * already refuses `AUTH_IDENTITY_ADAPTER=mock` without `INTEGRATION_TEST_RUN=1`; the
+ * second check here keeps the selection safe even for a hand-built `AppEnv`.
+ */
+export function createIdentityAdapter(cradle: Cradle): GithubIdentityPort {
+  const { env } = cradle;
+  if (env.AUTH_IDENTITY_ADAPTER === 'mock' && env.INTEGRATION_TEST_RUN) {
+    return new MockGithubIdentityAdapter(cradle);
+  }
+  return new GithubIdentityAdapter(cradle);
+}
+
 async function build(): Promise<AwilixContainer<Cradle>> {
   const env = getEnv();
   assertProductionConfig(env);
@@ -57,6 +73,7 @@ async function build(): Promise<AwilixContainer<Cradle>> {
     eventBus: asClass(EventBus).singleton(),
     sessionService: asClass(SessionService).singleton(),
     tokenService: asClass(TokenService).singleton(),
+    identity: asFunction(createIdentityAdapter).singleton(),
     // A forked EntityManager per scope gives each request its own identity map / UoW.
     em: asFunction(({ orm }: Cradle) => orm.em.fork()).scoped(),
     userService: asClass(UserService).scoped(),

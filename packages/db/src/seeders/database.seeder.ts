@@ -11,6 +11,8 @@ import { MentorProfile } from '../entities/mentors/mentor-profile.entity';
 export const SEED_MENTOR_EMAIL = 'ada@devmentor.dev';
 /** Mock identity persona `mock-mentee`. */
 export const SEED_MENTEE_EMAIL = 'mock-mentee@devmentor.test';
+/** Mock identity persona `mock-mentor`: a mentor-only account with no profile yet. */
+export const SEED_MOCK_MENTOR_EMAIL = 'mock-mentor@devmentor.test';
 /** Mock identity persona `mock-operator`; matches `OPERATOR_EMAILS` in the harness. */
 export const SEED_OPERATOR_EMAIL = 'mock-operator@devmentor.test';
 
@@ -42,6 +44,11 @@ export const SEED_USERS: readonly SeedUser[] = [
     roles: ['mentee'],
   },
   {
+    email: SEED_MOCK_MENTOR_EMAIL,
+    displayName: 'Mock Mentor',
+    roles: ['mentor'],
+  },
+  {
     // Holds `mentor` too, proving combined roles do not erase each other.
     email: SEED_OPERATOR_EMAIL,
     displayName: 'Mock Operator',
@@ -50,7 +57,7 @@ export const SEED_USERS: readonly SeedUser[] = [
 ];
 
 /**
- * Default seeder — a mentor, a mentee and an operator, all with a verified email, so a
+ * Default seeder — two mentors, a mentee and an operator, all with a verified email, so a
  * fresh database has something to render and every persona can sign in. Run with
  * `npm run db:seed`.
  *

@@ -6,6 +6,7 @@ import {
   DatabaseSeeder,
   SEED_MENTEE_EMAIL,
   SEED_MENTOR_EMAIL,
+  SEED_MOCK_MENTOR_EMAIL,
   SEED_OPERATOR_EMAIL,
   SEED_USERS,
 } from './database.seeder';
@@ -40,7 +41,7 @@ describe('DatabaseSeeder', () => {
     vi.useRealTimers();
   });
 
-  it('creates the mentor, mentee and operator, all verified, on an empty database', async () => {
+  it('creates both mentors, the mentee and the operator, all verified, on an empty database', async () => {
     const em = fakeEntityManager();
 
     await seed(em);
@@ -55,6 +56,7 @@ describe('DatabaseSeeder', () => {
     expect(em.findOne.mock.calls).toEqual([
       [User, { email: SEED_MENTOR_EMAIL }],
       [User, { email: SEED_MENTEE_EMAIL }],
+      [User, { email: SEED_MOCK_MENTOR_EMAIL }],
       [User, { email: SEED_OPERATOR_EMAIL }],
     ]);
     expect(em.create.mock.calls).toEqual([
@@ -76,6 +78,15 @@ describe('DatabaseSeeder', () => {
           email: 'mock-mentee@devmentor.test',
           displayName: 'Mock Mentee',
           roles: ['mentee'],
+          emailVerifiedAt: NOW,
+        },
+      ],
+      [
+        User,
+        {
+          email: 'mock-mentor@devmentor.test',
+          displayName: 'Mock Mentor',
+          roles: ['mentor'],
           emailVerifiedAt: NOW,
         },
       ],
@@ -112,6 +123,11 @@ describe('DatabaseSeeder', () => {
     const rows = {
       [SEED_MENTOR_EMAIL]: { email: SEED_MENTOR_EMAIL, roles: ['mentor'], emailVerifiedAt: verifiedAt },
       [SEED_MENTEE_EMAIL]: { email: SEED_MENTEE_EMAIL, roles: ['mentee'], emailVerifiedAt: verifiedAt },
+      [SEED_MOCK_MENTOR_EMAIL]: {
+        email: SEED_MOCK_MENTOR_EMAIL,
+        roles: ['mentor'],
+        emailVerifiedAt: verifiedAt,
+      },
       [SEED_OPERATOR_EMAIL]: {
         email: SEED_OPERATOR_EMAIL,
         roles: ['mentor', 'operator'],
@@ -122,7 +138,7 @@ describe('DatabaseSeeder', () => {
 
     await seed(em);
 
-    expect(em.findOne).toHaveBeenCalledTimes(3);
+    expect(em.findOne).toHaveBeenCalledTimes(4);
     expect(em.create).not.toHaveBeenCalled();
     // An existing verification timestamp is kept, not moved to "now".
     Object.values(rows).forEach((row) => expect(row.emailVerifiedAt).toBe(verifiedAt));
@@ -139,16 +155,18 @@ describe('DatabaseSeeder', () => {
     await seed(em);
 
     expect(ada).toEqual({ roles: ['mentor'], emailVerifiedAt: NOW });
-    expect(em.create).toHaveBeenCalledTimes(2);
+    expect(em.create).toHaveBeenCalledTimes(3);
     expect(em.create).not.toHaveBeenCalledWith(MentorProfile, expect.anything());
     expect(em.create.mock.calls.map(([, data]) => (data as { email: string }).email)).toEqual([
       SEED_MENTEE_EMAIL,
+      SEED_MOCK_MENTOR_EMAIL,
       SEED_OPERATOR_EMAIL,
     ]);
   });
 
   it('follows the <login>@devmentor.test rule for the mock personas', () => {
     expect(SEED_MENTEE_EMAIL).toBe('mock-mentee@devmentor.test');
+    expect(SEED_MOCK_MENTOR_EMAIL).toBe('mock-mentor@devmentor.test');
     expect(SEED_OPERATOR_EMAIL).toBe('mock-operator@devmentor.test');
     expect(SEED_MENTOR_EMAIL).toBe('ada@devmentor.dev');
   });

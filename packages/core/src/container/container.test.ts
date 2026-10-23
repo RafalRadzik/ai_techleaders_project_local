@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { requireSession } from '../http/auth';
 import { UnauthorizedError } from '../http/errors';
+import { GithubIdentityAdapter } from '../services/auth/adapters/github-identity';
+import { MockGithubIdentityAdapter } from '../services/auth/adapters/mock-github-identity';
 import { SessionService } from '../services/auth/session.service';
 import { TokenService } from '../services/auth/token.service';
 import { systemClock } from '../time/clock';
 import type { AppEnv, RawEnv } from '../config/env';
+import type { Cradle } from './cradle';
 
 const findOne = vi.fn();
 const fork = vi.fn(() => ({ forked: true, findOne }));
@@ -26,9 +29,14 @@ vi.mock('../config/env', async (importOriginal) => {
   return { ...actual, getEnv: (): AppEnv => actual.parseAppEnv(envState.overrides) };
 });
 
-const { getContainer, withRequestScope, withScope, withSessionCookieScope } = await import(
-  './container'
-);
+const {
+  createIdentityAdapter,
+  getContainer,
+  withRequestScope,
+  withScope,
+  withSessionCookieScope,
+} = await import('./container');
+const { parseAppEnv } = await import('../config/env');
 
 const globalForContainer = globalThis as { __devmentorContainer?: unknown };
 
@@ -96,6 +104,45 @@ describe('getContainer', () => {
     const { cradle } = await getContainer();
     await cradle.eventBus.emit('auth.user.created', { userId: 'u1', email: 'u1@example.com' });
     expect(logger.info).toHaveBeenCalledWith({ userId: 'u1' }, 'auth.user.created');
+  });
+});
+
+describe('identity adapter selection', () => {
+  it('registers the real GitHub adapter by default, as a singleton', async () => {
+    const container = await getContainer();
+    const { identity } = container.cradle;
+    expect(identity).toBeInstanceOf(GithubIdentityAdapter);
+    expect(container.createScope().cradle.identity).toBe(identity);
+  });
+
+  it('registers the real adapter when only the integration-run signal is set', async () => {
+    envState.overrides = { INTEGRATION_TEST_RUN: '1' };
+    const { cradle } = await getContainer();
+    expect(cradle.identity).toBeInstanceOf(GithubIdentityAdapter);
+  });
+
+  it('registers the mock adapter when both signals are set', async () => {
+    envState.overrides = { AUTH_IDENTITY_ADAPTER: 'mock', INTEGRATION_TEST_RUN: '1' };
+    const { cradle } = await getContainer();
+    expect(cradle.identity).toBeInstanceOf(MockGithubIdentityAdapter);
+  });
+
+  it('never builds a container with the mock in a production-shaped env without the signal', async () => {
+    envState.overrides = {
+      NODE_ENV: 'production',
+      SESSION_SECRET: 's'.repeat(32),
+      AUTH_IDENTITY_ADAPTER: 'mock',
+    };
+    await expect(getContainer()).rejects.toThrow(
+      'AUTH_IDENTITY_ADAPTER=mock is only allowed with INTEGRATION_TEST_RUN=1',
+    );
+  });
+
+  it('falls back to the real adapter for a hand-built env with only the switch', () => {
+    const env = { ...parseAppEnv({}), AUTH_IDENTITY_ADAPTER: 'mock' as const };
+    expect(createIdentityAdapter({ env, logger } as unknown as Cradle)).toBeInstanceOf(
+      GithubIdentityAdapter,
+    );
   });
 });
 

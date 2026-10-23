@@ -29,6 +29,7 @@ export default defineConfig({
         'packages/core/src/http/makeCrudRoute.ts',
         'packages/core/src/http/outbound.ts',
         'packages/core/src/http/return-to.ts',
+        'packages/core/src/services/auth/token.service.ts',
         'packages/core/src/time/clock.ts',
         'packages/db/src/config.ts',
         'packages/db/src/entities/auth/user.entity.ts',

@@ -19,7 +19,7 @@ Each phase ends with a manual-test checkpoint; the next phase starts only after 
 - [x] 2.2 `ServiceUnavailableError` + `AppError.headers`, `safeReturnTo`, `fetchJson` (step 4)
 - [x] 2.3 Env vars + two-signal `superRefine` + production-secret check in `createContainer`; mirror in `.env.example`, `README.md`, `ci.yml`, integration env (step 5)
 - [x] 2.4 `auth-identity` migration + `User` entity fields + roles CHECK + verified backfill + seeder (step 6)
-- [ ] 2.5 Token service (`jose`, purpose tokens) (step 7)
+- [x] 2.5 Token service (`jose`, purpose tokens) (step 7)
 - [ ] 2.6 Session service (issue/verify/clear, hand-rolled cookie) (step 8)
 - [ ] 2.7 Live `requireSession`, `Role` rename + `roles` set, `withRequestScope` + scoped `session`, CSRF in `apiHandler`; BACKWARD_COMPATIBILITY §2/§7 (step 9)
 

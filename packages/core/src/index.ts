@@ -2,6 +2,11 @@ export { getEnv, type AppEnv } from './config/env';
 export { createLogger, type Logger } from './logger';
 export { systemClock, type Clock } from './time/clock';
 export { getContainer, withScope, type Cradle } from './container/index';
+export {
+  TokenService,
+  type PurposeTokenClaims,
+  type SignPurposeTokenInput,
+} from './services/auth/token.service';
 export { UserService, type UserDto } from './services/auth/user.service';
 export { EventBus, type EventHandler, type EventId, type EventMap } from './events/index';
 export { userCreateSchema, type UserCreateInput } from './validators/auth/user-create.schema';

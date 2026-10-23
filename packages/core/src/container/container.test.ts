@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { TokenService } from '../services/auth/token.service';
 import { systemClock } from '../time/clock';
 import type { AppEnv, RawEnv } from '../config/env';
 
@@ -48,6 +49,23 @@ describe('getContainer', () => {
     expect(cradle.orm).toBe(orm);
     expect(cradle.eventBus).toBeDefined();
     expect(cradle.eventBus).toBe(cradle.eventBus);
+  });
+
+  it('registers the token service as a singleton wired to env and clock', async () => {
+    envState.overrides = { SESSION_SECRET: 's'.repeat(32) };
+    const container = await getContainer();
+    const { tokenService } = container.cradle;
+    expect(tokenService).toBeInstanceOf(TokenService);
+    expect(container.createScope().cradle.tokenService).toBe(tokenService);
+
+    const token = await tokenService.signPurposeToken({
+      purpose: 'email-verification',
+      subject: 'u1',
+      ttlSeconds: 60,
+    });
+    await expect(tokenService.verifyPurposeToken(token, 'email-verification')).resolves.toEqual({
+      subject: 'u1',
+    });
   });
 
   it('logs auth.user.created through the default subscriber', async () => {

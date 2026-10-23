@@ -5,12 +5,38 @@ import {
   type EntityManager,
 } from '@devmentor/db';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { parseAppEnv } from '../../config/env';
 import type { EventBus } from '../../events/event-bus';
 import type { Session } from '../../http/auth';
-import { ForbiddenError, NotFoundError, UnauthorizedError } from '../../http/errors';
+import {
+  ForbiddenError,
+  NotFoundError,
+  ServiceUnavailableError,
+  TooManyRequestsError,
+  UnauthorizedError,
+} from '../../http/errors';
+import {
+  REGISTRATION_PER_IP,
+  SIGN_IN_PER_EMAIL,
+  SIGN_IN_PER_IP,
+  rateLimitKey,
+  type RateLimitCheck,
+  type RateLimiter,
+} from '../../http/rate-limit';
 import type { Logger } from '../../logger';
+import { EmailVerificationService } from './email-verification.service';
 import type { GithubIdentity } from './github-identity.port';
-import { AccountNotLinkedError, LastRoleError, UserService } from './user.service';
+import type { PasswordService } from './password.service';
+import { SessionService } from './session.service';
+import { TokenService } from './token.service';
+import {
+  AccountExistsError,
+  AccountNotLinkedError,
+  INVALID_CREDENTIALS_MESSAGE,
+  LastRoleError,
+  PasswordSignInRefusedError,
+  UserService,
+} from './user.service';
 
 const NOW = new Date('2026-10-23T10:00:00.000Z');
 const EARLIER = new Date('2026-09-01T08:00:00.000Z');
@@ -28,6 +54,7 @@ interface Row {
   sessionVersion: number;
   createdAt: Date;
   mentorProfile?: { id: string; headline: string } | null;
+  passwordHash?: string | null;
 }
 
 function row(overrides: Partial<Row> & Pick<Row, 'id' | 'email'>): Row {
@@ -104,23 +131,77 @@ function makeService(
   em: FakeEm,
   operatorEmails: string[] = [],
   session: Session | null = OPERATOR,
+  verification?: Pick<EmailVerificationService, 'send'>,
 ) {
-  const logger = { info: vi.fn(), error: vi.fn() };
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const eventBus = { emit: vi.fn(async () => undefined) };
   const sessionRead = vi.fn(() => Promise.resolve(session));
+  // Records B8's ordering: gate slot, then limits, then the credential work.
+  const steps: string[] = [];
+  const slot = {
+    hash: vi.fn(async (plain: string) => {
+      steps.push('hash');
+      return `hash:${plain}`;
+    }),
+    // A `null` (unknown email, no password) still costs a derivation in the real slot.
+    verify: vi.fn(async (plain: string, stored: string | null) => {
+      steps.push('verify');
+      return stored === `hash:${plain}`;
+    }),
+  };
+  const passwordService = {
+    withSlot: vi.fn(async <T>(fn: (held: typeof slot) => Promise<T>): Promise<T> => {
+      steps.push('slot');
+      return fn(slot);
+    }),
+  };
+  const rateLimiter = {
+    consumeAll: vi.fn(async () => {
+      steps.push('consume');
+    }),
+  };
+  const emailVerificationService = {
+    send: vi.fn<(recipient: unknown, returnTo?: string | null) => Promise<void>>(async () => {
+      steps.push('mail');
+    }),
+  };
+  const credentialsRead = vi.fn();
   const deps = {
     em: em as unknown as EntityManager,
     logger: logger as unknown as Logger,
     eventBus: eventBus as unknown as EventBus,
     clock: { now: () => NOW },
-    env: { OPERATOR_EMAILS: operatorEmails },
+    env: { OPERATOR_EMAILS: operatorEmails, TRUSTED_PROXY_HOPS: 1 },
     // A getter, like awilix's PROXY cradle: reading it is what resolves the session.
     get session() {
       return sessionRead();
     },
+    get passwordService() {
+      credentialsRead('passwordService');
+      return passwordService as unknown as PasswordService;
+    },
+    get rateLimiter() {
+      credentialsRead('rateLimiter');
+      return rateLimiter as unknown as RateLimiter;
+    },
+    get emailVerificationService() {
+      credentialsRead('emailVerificationService');
+      return (verification ?? emailVerificationService) as unknown as EmailVerificationService;
+    },
   };
   const service = new UserService(deps);
-  return { service, logger, eventBus, sessionRead };
+  return {
+    service,
+    logger,
+    eventBus,
+    sessionRead,
+    steps,
+    slot,
+    passwordService,
+    rateLimiter,
+    emailVerificationService,
+    credentialsRead,
+  };
 }
 
 const identity = (overrides: Partial<GithubIdentity> = {}): GithubIdentity => ({
@@ -711,5 +792,377 @@ describe('UserService.signOut', () => {
   it('changes nothing for an unknown user', async () => {
     const { service } = makeService(em);
     await expect(service.signOut({ userId: 'missing', sessionVersion: 0 })).resolves.toBe(false);
+  });
+});
+
+const CLIENT_IP = '203.0.113.7';
+// One trusted proxy hop (see makeService), so the client address is the last entry.
+const REQ = new Request('https://devmentor.example/api/auth', {
+  headers: { 'x-forwarded-for': `198.51.100.9, ${CLIENT_IP}` },
+});
+const REGISTRATION_CHECKS: RateLimitCheck[] = [
+  { key: rateLimitKey('registration', 'ip', CLIENT_IP), policy: REGISTRATION_PER_IP },
+];
+const signInChecks = (email: string): RateLimitCheck[] => [
+  { key: rateLimitKey('sign-in', 'ip', CLIENT_IP), policy: SIGN_IN_PER_IP },
+  { key: rateLimitKey('sign-in', 'email', email), policy: SIGN_IN_PER_EMAIL },
+];
+const PASSWORD = 'correct horse battery';
+
+const registration = (overrides: Partial<{ email: string; displayName: string; returnTo: string }> = {}) => ({
+  email: 'new@example.com',
+  password: PASSWORD,
+  displayName: 'New Person',
+  returnTo: '/mentors/7',
+  ...overrides,
+});
+
+const login = (email = 'ada@example.com', password = PASSWORD) => ({ email, password });
+
+describe('UserService.registerWithPassword — the state matrix', () => {
+  it('creates an unverified mentee with the hash written, then mails the bound link', async () => {
+    const { service, eventBus, steps, rateLimiter, emailVerificationService } = makeService(em);
+
+    await expect(service.registerWithPassword(registration(), REQ)).resolves.toEqual({
+      email: 'new@example.com',
+    });
+
+    expect(em.rows).toEqual([
+      expect.objectContaining({
+        id: 'new-1',
+        email: 'new@example.com',
+        displayName: 'New Person',
+        roles: ['mentee'],
+        passwordHash: `hash:${PASSWORD}`,
+        emailVerifiedAt: null,
+      }),
+    ]);
+    expect(em.findOne).toHaveBeenCalledWith(User, { email: 'new@example.com' }, {
+      lockMode: LockMode.PESSIMISTIC_WRITE,
+    });
+    expect(eventBus.emit).toHaveBeenCalledWith('auth.user.created', {
+      userId: 'new-1',
+      email: 'new@example.com',
+    });
+    expect(emailVerificationService.send).toHaveBeenCalledWith(
+      { id: 'new-1', email: 'new@example.com', passwordHash: `hash:${PASSWORD}` },
+      '/mentors/7',
+    );
+    expect(rateLimiter.consumeAll).toHaveBeenCalledWith(REGISTRATION_CHECKS);
+    // Gate slot, then limits, then the hash; the mail only after the commit.
+    expect(steps).toEqual(['slot', 'consume', 'hash', 'mail']);
+  });
+
+  it.each([
+    [
+      'verified with a password',
+      { passwordHash: 'hash:theirs', githubId: '42' },
+      'account_exists',
+      'This address already has an account. Sign in instead.',
+    ],
+    [
+      'verified, GitHub only',
+      { passwordHash: null, githubId: '42' },
+      'github_account',
+      'This address already has an account that signs in with GitHub. Use "Continue with GitHub" instead.',
+    ],
+    [
+      'verified with neither password nor GitHub (a seeded row)',
+      { passwordHash: null, githubId: null },
+      'account_exists',
+      'This address already has an account. Sign in instead.',
+    ],
+  ])('refuses an address %s with 409', async (_label, existing, reason, message) => {
+    const ada = row({ id: 'u1', email: 'ada@example.com', ...existing });
+    em = fakeEm([ada]);
+    const { service, eventBus, emailVerificationService } = makeService(em);
+
+    const error = await service
+      .registerWithPassword(registration({ email: 'ada@example.com' }), REQ)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(AccountExistsError);
+    expect(error).toMatchObject({ status: 409, code: 'conflict', reason, message });
+    expect(ada.passwordHash).toBe(existing.passwordHash);
+    expect(ada.displayName).toBe('u1');
+    expect(eventBus.emit).not.toHaveBeenCalled();
+    expect(emailVerificationService.send).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['without a password', null],
+    ['with an earlier password', 'hash:earlier attempt'],
+  ])('claims an unverified row %s: writes the hash and mails a fresh link', async (_label, earlier) => {
+    const ada = row({
+      id: 'u1',
+      email: 'ada@example.com',
+      roles: ['mentee', 'mentor'],
+      emailVerifiedAt: null,
+      passwordHash: earlier,
+    });
+    em = fakeEm([ada]);
+    const { service, eventBus, emailVerificationService } = makeService(em);
+
+    await service.registerWithPassword(registration({ email: 'ada@example.com' }), REQ);
+
+    expect(em.rows).toHaveLength(1);
+    expect(ada).toMatchObject({
+      passwordHash: `hash:${PASSWORD}`,
+      displayName: 'New Person',
+      roles: ['mentee', 'mentor'],
+      emailVerifiedAt: null,
+      sessionVersion: 3,
+    });
+    expect(eventBus.emit).not.toHaveBeenCalled();
+    expect(emailVerificationService.send).toHaveBeenCalledWith(
+      { id: 'u1', email: 'ada@example.com', passwordHash: `hash:${PASSWORD}` },
+      '/mentors/7',
+    );
+  });
+
+  it('a rate-limited attempt neither hashes nor reads users', async () => {
+    const { service, steps, rateLimiter, slot } = makeService(em);
+    const limited = new TooManyRequestsError(60);
+    rateLimiter.consumeAll.mockRejectedValueOnce(limited);
+
+    await expect(service.registerWithPassword(registration(), REQ)).rejects.toBe(limited);
+    expect(steps).toEqual(['slot']);
+    expect(slot.hash).not.toHaveBeenCalled();
+    expect(em.findOne).not.toHaveBeenCalled();
+  });
+
+  it('reports a mail failure as 503 and leaves only the unverified row behind', async () => {
+    const { service, emailVerificationService } = makeService(em);
+    const failure = new ServiceUnavailableError('Mail delivery failed');
+    emailVerificationService.send.mockRejectedValueOnce(failure);
+
+    await expect(service.registerWithPassword(registration(), REQ)).rejects.toBe(failure);
+    expect(em.rows).toEqual([
+      expect.objectContaining({ email: 'new@example.com', emailVerifiedAt: null }),
+    ]);
+  });
+
+  it('resolves the password collaborators only when a password flow runs', async () => {
+    const { service, credentialsRead } = makeService(em);
+    await service.findByEmail('ada@example.com');
+    expect(credentialsRead).not.toHaveBeenCalled();
+    await service.registerWithPassword(registration(), REQ);
+    expect(credentialsRead).toHaveBeenCalled();
+  });
+});
+
+describe('UserService.registerWithPassword — concurrent registration', () => {
+  it('re-runs once on users_email_unique and claims the winning unverified row', async () => {
+    const { service, eventBus, logger, emailVerificationService } = makeService(em);
+    em.failNextFlush(() => {
+      // The other registration committed its insert first.
+      em.rows.push(
+        row({ id: 'winner', email: 'new@example.com', emailVerifiedAt: null, passwordHash: 'hash:w' }),
+      );
+      return uniqueViolation('users_email_unique');
+    });
+
+    await service.registerWithPassword(registration(), REQ);
+
+    expect(em.transactional).toHaveBeenCalledTimes(2);
+    expect(em.rows).toEqual([
+      expect.objectContaining({ id: 'winner', passwordHash: `hash:${PASSWORD}` }),
+    ]);
+    expect(eventBus.emit).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith('password registration raced; re-reading');
+    expect(emailVerificationService.send).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'winner' }),
+      '/mentors/7',
+    );
+  });
+
+  it('answers 409 when the winner turns out verified', async () => {
+    const { service } = makeService(em);
+    em.failNextFlush(() => {
+      em.rows.push(row({ id: 'winner', email: 'new@example.com', githubId: '7' }));
+      return uniqueViolation('users_email_unique');
+    });
+    await expect(service.registerWithPassword(registration(), REQ)).rejects.toMatchObject({
+      reason: 'github_account',
+    });
+  });
+
+  it.each([
+    ['a unique violation on another constraint', () => uniqueViolation('users_github_id_unique')],
+    ['an error that is not a unique violation', () => new Error('boom')],
+  ])('rethrows %s', async (_label, make) => {
+    const { service } = makeService(em);
+    const failure = make();
+    em.failNextFlush(() => failure);
+    await expect(service.registerWithPassword(registration(), REQ)).rejects.toBe(failure);
+    expect(em.transactional).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries only once', async () => {
+    const { service } = makeService(em);
+    const second = uniqueViolation('users_email_unique');
+    em.failNextFlush(() => uniqueViolation('users_email_unique'));
+    em.failNextFlush(() => second);
+    await expect(service.registerWithPassword(registration(), REQ)).rejects.toBe(second);
+    expect(em.transactional).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('UserService.authenticateWithPassword', () => {
+  const verifiedAda = (overrides: Partial<Row> = {}) =>
+    row({
+      id: 'u1',
+      email: 'ada@example.com',
+      roles: ['mentee', 'mentor'],
+      passwordHash: `hash:${PASSWORD}`,
+      mentorProfile: { id: 'mp1', headline: 'Compilers' },
+      ...overrides,
+    });
+
+  it('signs in a verified row and preserves every stored role', async () => {
+    em = fakeEm([verifiedAda()]);
+    const { service, steps, rateLimiter, eventBus } = makeService(em);
+
+    const result = await service.authenticateWithPassword(login(), REQ);
+
+    expect(result).toEqual({
+      user: expect.objectContaining({ id: 'u1', roles: ['mentee', 'mentor'] }),
+      sessionVersion: 3,
+      effectiveRoles: ['mentee', 'mentor'],
+    });
+    expect(result.user).not.toHaveProperty('passwordHash');
+    expect(em.rows[0]).toMatchObject({ roles: ['mentee', 'mentor'], sessionVersion: 3 });
+    expect(eventBus.emit).not.toHaveBeenCalled();
+    expect(rateLimiter.consumeAll).toHaveBeenCalledWith(signInChecks('ada@example.com'));
+    expect(steps).toEqual(['slot', 'consume', 'verify']);
+    expect(em.findOne).toHaveBeenCalledWith(User, { email: 'ada@example.com' }, {
+      populate: ['mentorProfile'],
+    });
+  });
+
+  it('fails an unknown email and a wrong password byte-identically, both after a derivation', async () => {
+    em = fakeEm([verifiedAda()]);
+    const { service, slot } = makeService(em);
+
+    const unknown = (await service
+      .authenticateWithPassword(login('nobody@example.com'), REQ)
+      .catch((caught: unknown) => caught)) as UnauthorizedError;
+    const wrong = (await service
+      .authenticateWithPassword(login('ada@example.com', 'wrong password!'), REQ)
+      .catch((caught: unknown) => caught)) as UnauthorizedError;
+
+    for (const error of [unknown, wrong]) {
+      expect(error).toBeInstanceOf(UnauthorizedError);
+      expect(error.constructor).toBe(UnauthorizedError);
+    }
+    expect(unknown.message).toBe(INVALID_CREDENTIALS_MESSAGE);
+    expect(Buffer.from(unknown.message)).toEqual(Buffer.from(wrong.message));
+    expect([unknown.status, unknown.code, unknown.name]).toEqual([wrong.status, wrong.code, wrong.name]);
+    expect(slot.verify.mock.calls).toEqual([
+      [PASSWORD, null],
+      ['wrong password!', `hash:${PASSWORD}`],
+    ]);
+  });
+
+  it('gives a GitHub-only row (no password) the same generic 401', async () => {
+    em = fakeEm([verifiedAda({ passwordHash: null, githubId: '42' })]);
+    const { service } = makeService(em);
+    await expect(service.authenticateWithPassword(login(), REQ)).rejects.toMatchObject({
+      constructor: UnauthorizedError,
+      message: INVALID_CREDENTIALS_MESSAGE,
+    });
+  });
+
+  it('refuses the right password before the email is verified, with the reason', async () => {
+    em = fakeEm([verifiedAda({ emailVerifiedAt: null })]);
+    const { service } = makeService(em);
+    const error = await service
+      .authenticateWithPassword(login(), REQ)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(PasswordSignInRefusedError);
+    expect(error).toBeInstanceOf(ForbiddenError);
+    expect(error).toMatchObject({
+      status: 403,
+      reason: 'email_unverified',
+      message: 'Confirm your email address first. Open the link in the email we sent you, then sign in.',
+    });
+  });
+
+  it('reconciles operator live for an allowlisted address', async () => {
+    em = fakeEm([verifiedAda({ email: FOUNDER })]);
+    const { service, eventBus } = makeService(em, [FOUNDER]);
+    const result = await service.authenticateWithPassword(login(FOUNDER), REQ);
+    expect(result.effectiveRoles).toEqual(['mentee', 'mentor', 'operator']);
+    expect(em.rows[0]).toMatchObject({ roles: ['mentee', 'mentor', 'operator'], sessionVersion: 3 });
+    expect(eventNames(eventBus)).toEqual(['auth.user.roles_changed']);
+  });
+
+  it('refuses an operator-only row no longer on the allowlist', async () => {
+    em = fakeEm([verifiedAda({ roles: ['operator'] })]);
+    const { service } = makeService(em);
+    await expect(service.authenticateWithPassword(login(), REQ)).rejects.toMatchObject({
+      constructor: PasswordSignInRefusedError,
+      reason: 'no_active_role',
+      message: 'This account has no active role. Ask an operator for access.',
+    });
+  });
+
+  it('a rate-limited attempt never reads users or verifies', async () => {
+    em = fakeEm([verifiedAda()]);
+    const { service, rateLimiter, slot } = makeService(em);
+    const limited = new TooManyRequestsError(30);
+    rateLimiter.consumeAll.mockRejectedValueOnce(limited);
+    await expect(service.authenticateWithPassword(login(), REQ)).rejects.toBe(limited);
+    expect(em.findOne).not.toHaveBeenCalled();
+    expect(slot.verify).not.toHaveBeenCalled();
+  });
+});
+
+describe('UserService password flows — claiming issues no session until verification', () => {
+  it('refuses sign-in after a claim, invalidates the earlier link, and signs in after the new one', async () => {
+    const victim = row({
+      id: '0b8f6a52-4a0e-4f8e-9a51-6f0d2c7e1a11',
+      email: 'ada@example.com',
+      emailVerifiedAt: null,
+      passwordHash: 'hash:first attempt',
+    });
+    em = fakeEm([victim]);
+    const env = parseAppEnv({ SESSION_SECRET: 's'.repeat(32), APP_URL: 'https://devmentor.example/' });
+    const clock = { now: () => NOW };
+    const links: string[] = [];
+    const verification = new EmailVerificationService({
+      em: em as unknown as EntityManager,
+      tokenService: new TokenService({ env, clock }),
+      sessionService: new SessionService({ env, clock }),
+      userService: { reconcileOperator: (id: string) => service.reconcileOperator(id) },
+      mailer: {
+        send: async ({ text }) => {
+          links.push(new URL(text.split('\n').find((line) => line.startsWith('https://'))!).searchParams.get('token')!);
+        },
+      },
+      clock,
+      env,
+    });
+    const { service } = makeService(em, [], null, verification);
+
+    // The first registrant's link, bound to the hash the row held then.
+    await verification.send({ id: victim.id, email: victim.email, passwordHash: 'hash:first attempt' });
+    await service.registerWithPassword(registration({ email: 'ada@example.com' }), REQ);
+
+    await expect(service.authenticateWithPassword(login(), REQ)).rejects.toMatchObject({
+      reason: 'email_unverified',
+    });
+    await expect(
+      service.authenticateWithPassword(login('ada@example.com', 'first attempt'), REQ),
+    ).rejects.toMatchObject({ message: INVALID_CREDENTIALS_MESSAGE });
+    await expect(verification.verify(links[0]!)).rejects.toMatchObject({ status: 400 });
+    expect(victim.emailVerifiedAt).toBeNull();
+
+    const verified = await verification.verify(links[1]!);
+    expect(verified.cookie).toEqual(expect.any(String));
+    await expect(service.authenticateWithPassword(login(), REQ)).resolves.toMatchObject({
+      user: { id: victim.id },
+      effectiveRoles: ['mentee'],
+    });
   });
 });

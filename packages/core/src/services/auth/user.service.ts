@@ -8,10 +8,26 @@ import {
 import type { AppEnv } from '../../config/env';
 import type { EventBus } from '../../events/event-bus';
 import { requireRole, type Session } from '../../http/auth';
-import { ConflictError, NotFoundError, UnauthorizedError } from '../../http/errors';
+import {
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  UnauthorizedError,
+} from '../../http/errors';
+import {
+  guardCredentialAttempt,
+  registrationLimits,
+  signInLimits,
+  type RateLimitKeyDeps,
+  type RateLimiter,
+} from '../../http/rate-limit';
 import type { Logger } from '../../logger';
 import type { Clock } from '../../time/clock';
+import type { LoginInput } from '../../validators/auth/login.schema';
+import type { RegisterInput } from '../../validators/auth/register.schema';
+import type { EmailVerificationService } from './email-verification.service';
 import type { GithubIdentity } from './github-identity.port';
+import type { PasswordService } from './password.service';
 import type { SessionClaims } from './session.service';
 import {
   isOperatorEligible,
@@ -62,6 +78,67 @@ export interface GithubSignIn {
    * has no authority to sign in with; the callback refuses it.
    */
   effectiveRoles: Role[];
+}
+
+/** What the login route needs to sign the user in: the DTO plus the cookie's version. */
+export interface PasswordSignIn {
+  user: UserDto;
+  /** Signed into the session cookie; deliberately kept out of `UserDto`. */
+  sessionVersion: number;
+  /** The roles the new session holds, `operator` resolved live. Never empty. */
+  effectiveRoles: Role[];
+}
+
+/** What a registration reports: only the address the verification link was sent to. */
+export interface PasswordRegistration {
+  email: string;
+}
+
+/**
+ * The one message for an unknown email *and* a wrong password (edge case 13): login never
+ * says which part was wrong, so it is no account-existence oracle.
+ */
+export const INVALID_CREDENTIALS_MESSAGE = 'Invalid credentials';
+
+export type AccountExistsReason = 'account_exists' | 'github_account';
+
+/**
+ * Registration refused because the address belongs to a verified account (edge case 14 and
+ * the state matrix). `github_account` — the account signs in with GitHub only — points
+ * there; this is the register path's deliberate account-existence oracle, recorded in the
+ * spec. Every other verified row gets the generic `account_exists`.
+ */
+export class AccountExistsError extends ConflictError {
+  readonly reason: AccountExistsReason;
+
+  constructor(reason: AccountExistsReason) {
+    super(
+      reason === 'github_account'
+        ? 'This address already has an account that signs in with GitHub. Use "Continue with GitHub" instead.'
+        : 'This address already has an account. Sign in instead.',
+    );
+    this.reason = reason;
+  }
+}
+
+export type PasswordSignInRefusedReason = 'email_unverified' | 'no_active_role';
+
+/**
+ * The right password, but no session (edge case 15): the email is not confirmed yet, or an
+ * operator-only account is no longer on the allowlist. Only someone who knows the password
+ * ever sees this, so it reveals nothing the generic 401 hides.
+ */
+export class PasswordSignInRefusedError extends ForbiddenError {
+  readonly reason: PasswordSignInRefusedReason;
+
+  constructor(reason: PasswordSignInRefusedReason) {
+    super(
+      reason === 'email_unverified'
+        ? 'Confirm your email address first. Open the link in the email we sent you, then sign in.'
+        : 'This account has no active role. Ask an operator for access.',
+    );
+    this.reason = reason;
+  }
 }
 
 /** A grant or revoke result: what the route needs to re-issue the caller's cookie. */
@@ -118,6 +195,14 @@ function isGithubIdentityRace(error: unknown): boolean {
   );
 }
 
+/** A concurrent registration for the same new address trips only the email constraint. */
+function isRegistrationRace(error: unknown): boolean {
+  return (
+    error instanceof UniqueConstraintViolationException &&
+    (error as { constraint?: unknown }).constraint === 'users_email_unique'
+  );
+}
+
 function toUserDto(user: IUser): UserDto {
   return {
     id: user.id,
@@ -146,15 +231,29 @@ interface GithubOutcome {
   rolesChanged: RolesChanged | null;
 }
 
+interface RegistrationOutcome {
+  user: IUser;
+  created: boolean;
+}
+
 /** What awilix (PROXY mode) hands the constructor: the resolving scope's cradle. */
 interface UserServiceDeps {
   em: EntityManager;
   logger: Logger;
   eventBus: EventBus;
   clock: Clock;
-  env: Pick<AppEnv, 'OPERATOR_EMAILS'>;
+  env: Pick<AppEnv, 'OPERATOR_EMAILS' | 'TRUSTED_PROXY_HOPS'>;
   session: Promise<Session | null>;
+  passwordService: Pick<PasswordService, 'withSlot'>;
+  rateLimiter: Pick<RateLimiter, 'consumeAll'>;
+  emailVerificationService: Pick<EmailVerificationService, 'send'>;
 }
+
+/** The collaborators only the password flows use, resolved on first use. */
+type CredentialDeps = Pick<
+  UserServiceDeps,
+  'passwordService' | 'rateLimiter' | 'emailVerificationService'
+>;
 
 /**
  * Domain service for users. Constructor-injected by awilix (PROXY mode), so it
@@ -170,8 +269,9 @@ export class UserService {
   private readonly logger: Logger;
   private readonly eventBus: EventBus;
   private readonly clock: Clock;
-  private readonly env: Pick<AppEnv, 'OPERATOR_EMAILS'>;
+  private readonly env: Pick<AppEnv, 'OPERATOR_EMAILS' | 'TRUSTED_PROXY_HOPS'>;
   private readonly readSession: () => Promise<Session | null>;
+  private readonly credentials: () => CredentialDeps;
 
   constructor(deps: UserServiceDeps) {
     const { em, logger, eventBus, clock, env } = deps;
@@ -184,6 +284,9 @@ export class UserService {
     // session lookup for every caller, including ones that never need it. A closure
     // rather than a stored cradle, so inspecting the service never walks the proxy.
     this.readSession = () => deps.session;
+    // Also on demand: `emailVerificationService` depends on this service, so resolving it
+    // at construction would be a cycle, and most callers never touch a password.
+    this.credentials = () => deps;
   }
 
   /**
@@ -309,6 +412,95 @@ export class UserService {
   }
 
   /**
+   * Register an email/password account (#13), following the spec's state matrix for the
+   * row already holding `input.email`:
+   * - none — create a `mentee`, unverified, with the hash; emit `auth.user.created`;
+   * - verified with a password, or verified with neither password nor GitHub (a seeded
+   *   row) — `AccountExistsError('account_exists')`;
+   * - verified, GitHub only — `AccountExistsError('github_account')`, pointing to GitHub;
+   * - unverified (with or without a hash) — **claim**: write the new hash and display name.
+   * Then mail a verification link bound to the new hash, so every earlier link for the row
+   * stops working. No session is issued: `emailVerifiedAt` gates sign-in.
+   *
+   * `req` is the route's request, used only to derive B8's per-IP registration check
+   * (`registrationLimits`). The service, not the route, builds the checks and runs the hash
+   * inside `guardCredentialAttempt` — gate slot first, limits second, hash third — so no
+   * caller can skip the limit or reorder it: a saturated gate answers 503 without counting
+   * and a limited attempt never hashes. The slot covers
+   * only the hash; the transaction and the mail run after it is released. A conflict still
+   * costs one hash, so the 409 paths take as long as a success.
+   *
+   * Two registrations for one new address both miss and both insert; the loser hits
+   * `users_email_unique` and re-runs its transaction once, then claims the winner's
+   * still-unverified row. The mail goes out only after commit; a delivery failure rejects
+   * with `ServiceUnavailableError` and leaves the unverified row and its hash in place,
+   * which grants nothing and is overwritten by the next attempt.
+   */
+  async registerWithPassword(input: RegisterInput, req: Request): Promise<PasswordRegistration> {
+    const { passwordService, rateLimiter, emailVerificationService } = this.credentials();
+    const passwordHash = await guardCredentialAttempt(
+      { passwordService, rateLimiter },
+      registrationLimits(req, this.limitKeyDeps()),
+      (slot) => slot.hash(input.password),
+    );
+
+    let outcome: RegistrationOutcome;
+    try {
+      outcome = await this.registration(input, passwordHash);
+    } catch (error) {
+      if (!isRegistrationRace(error)) throw error;
+      this.logger.info('password registration raced; re-reading');
+      outcome = await this.registration(input, passwordHash);
+    }
+
+    const { user, created } = outcome;
+    if (created) {
+      this.logger.info({ userId: user.id }, 'created user from registration');
+      await this.eventBus.emit('auth.user.created', { userId: user.id, email: user.email });
+    }
+    await emailVerificationService.send(
+      { id: user.id, email: user.email, passwordHash },
+      input.returnTo,
+    );
+    return { email: user.email };
+  }
+
+  /**
+   * Check an email and password (#13) and return what the login route needs to issue a
+   * session. An unknown email and a wrong password fail identically — same class, status,
+   * code and `INVALID_CREDENTIALS_MESSAGE` — and an unknown email (or a row without a
+   * password) still spends one full derivation, so timing does not tell them apart either.
+   * The right password on an unverified row is refused with
+   * `PasswordSignInRefusedError('email_unverified')`, so claiming a row never yields a
+   * session before its link is followed.
+   *
+   * Runs inside `guardCredentialAttempt` like `registerWithPassword`, with the per-IP and
+   * per-email checks (`signInLimits`) derived here from `req` and the normalised email, and
+   * the lookup after the limits so a limited attempt never reads `users`. Stored roles are preserved; only the
+   * `operator` cache is reconciled, without bumping `sessionVersion`.
+   */
+  async authenticateWithPassword(input: LoginInput, req: Request): Promise<PasswordSignIn> {
+    const { passwordService, rateLimiter } = this.credentials();
+    const checks = signInLimits(req, input.email, this.limitKeyDeps());
+    const user = await guardCredentialAttempt({ passwordService, rateLimiter }, checks, async (slot) => {
+      const found = await this.em.findOne(
+        User,
+        { email: input.email },
+        { populate: ['mentorProfile'] },
+      );
+      const valid = await slot.verify(input.password, found?.passwordHash ?? null);
+      return valid ? found : null;
+    });
+    if (!user) throw new UnauthorizedError(INVALID_CREDENTIALS_MESSAGE);
+    if (user.emailVerifiedAt == null) throw new PasswordSignInRefusedError('email_unverified');
+
+    const stored = await this.reconcileOperator(user.id);
+    const effectiveRoles = liveRoles(stored, isOperatorEligible(user, this.env.OPERATOR_EMAILS));
+    if (effectiveRoles.length === 0) throw new PasswordSignInRefusedError('no_active_role');
+    return { user: toUserDto(user), sessionVersion: user.sessionVersion, effectiveRoles };
+  }
+
+  /**
    * Revoke the signed-in session behind `claims` by bumping `sessionVersion` — sign-out is
    * a trigger on the closed list. Only a *live* session is revoked: an unknown user or a
    * stale version changes nothing. The comparison runs under the row lock, so two
@@ -374,6 +566,44 @@ export class UserService {
     });
     em.persist(user);
     return { user, created: true };
+  }
+
+  private limitKeyDeps(): RateLimitKeyDeps {
+    return { env: this.env, logger: this.logger };
+  }
+
+  private registration(input: RegisterInput, passwordHash: string): Promise<RegistrationOutcome> {
+    return this.em.transactional(async (em) => {
+      // The lock serialises a claim with `EmailVerificationService.verify`, which compares
+      // the link's fingerprint against this hash under the same lock.
+      const existing = await em.findOne(
+        User,
+        { email: input.email },
+        { lockMode: LockMode.PESSIMISTIC_WRITE },
+      );
+      if (!existing) {
+        const user = em.create(User, {
+          email: input.email,
+          displayName: input.displayName,
+          roles: ['mentee'],
+          passwordHash,
+          emailVerifiedAt: null,
+        });
+        em.persist(user);
+        await em.flush();
+        return { user, created: true };
+      }
+      if (existing.emailVerifiedAt != null) {
+        throw new AccountExistsError(
+          existing.passwordHash == null && existing.githubId != null
+            ? 'github_account'
+            : 'account_exists',
+        );
+      }
+      existing.passwordHash = passwordHash;
+      existing.displayName = input.displayName;
+      return { user: existing, created: false };
+    });
   }
 
   /** Display data only: never `email`, which is the operator authorization key. */

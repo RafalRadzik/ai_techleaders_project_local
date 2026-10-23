@@ -13,6 +13,7 @@ import { LogMailer } from '../services/notifications/adapters/log-mailer';
 import { ResendMailer } from '../services/notifications/adapters/resend-mailer';
 import { SessionService } from '../services/auth/session.service';
 import { TokenService } from '../services/auth/token.service';
+import { UserService } from '../services/auth/user.service';
 import { systemClock } from '../time/clock';
 import type { AppEnv, RawEnv } from '../config/env';
 import type { Cradle } from './cradle';
@@ -26,6 +27,8 @@ const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 vi.mock('@devmentor/db', () => ({
   getOrm: vi.fn(async () => orm),
   User: class {},
+  LockMode: { PESSIMISTIC_WRITE: 'pessimistic_write' },
+  UniqueConstraintViolationException: class extends Error {},
   USER_ROLES: ['mentee', 'mentor', 'operator'],
 }));
 vi.mock('../logger', () => ({ createLogger: () => logger }));
@@ -309,20 +312,58 @@ describe('withScope', () => {
   it('registers a scoped email verification service on the scope EntityManager', async () => {
     envState.overrides = { SESSION_SECRET: 's'.repeat(32) };
     findOne.mockResolvedValue(null);
+    const scopeEm: Record<string, unknown> = { forked: true, findOne };
+    scopeEm.transactional = vi.fn(async (work: (em: unknown) => Promise<unknown>) => work(scopeEm));
+    fork.mockReturnValueOnce(scopeEm as never);
     const first = await withScope(async ({ emailVerificationService, tokenService }) => {
       expect(emailVerificationService).toBeInstanceOf(EmailVerificationService);
       const token = await tokenService.signPurposeToken({
         purpose: EMAIL_VERIFY_PURPOSE,
-        subject: 'u1.',
+        subject: 'u1..',
         ttlSeconds: 60,
       });
       await expect(emailVerificationService.verify(token)).rejects.toBeInstanceOf(BadRequestError);
       return emailVerificationService;
     });
-    expect(findOne).toHaveBeenCalledWith(expect.anything(), { id: 'u1' });
+    expect(findOne).toHaveBeenCalledWith(expect.anything(), { id: 'u1' }, expect.anything());
     expect(await withScope(({ emailVerificationService }) => emailVerificationService)).not.toBe(
       first,
     );
+  });
+
+  it('resolves UserService and EmailVerificationService in either order without a cycle', async () => {
+    const forward = await withScope(({ userService, emailVerificationService }) => ({
+      userService,
+      emailVerificationService,
+    }));
+    const reverse = await withScope(({ emailVerificationService, userService }) => ({
+      userService,
+      emailVerificationService,
+    }));
+    for (const pair of [forward, reverse]) {
+      expect(pair.userService).toBeInstanceOf(UserService);
+      expect(pair.emailVerificationService).toBeInstanceOf(EmailVerificationService);
+    }
+  });
+
+  it("lets UserService reach the scope's verification service lazily inside a password flow", async () => {
+    envState.overrides = { SESSION_SECRET: 's'.repeat(32) };
+    const reached = new Error('reached the registration transaction');
+    fork.mockReturnValueOnce({
+      forked: true,
+      findOne,
+      transactional: vi.fn(async () => Promise.reject(reached)),
+    } as never);
+    // No trusted proxy hop, so registration has no limit check and never touches the table;
+    // the real gate and hash run, then the stubbed transaction stops the flow.
+    await expect(
+      withScope(({ userService }) =>
+        userService.registerWithPassword(
+          { email: 'new@example.com', password: 'correct horse battery', displayName: 'New' },
+          new Request('https://devmentor.example/api/auth/register'),
+        ),
+      ),
+    ).rejects.toBe(reached);
   });
 
   it('disposes the scope and rethrows when fn fails', async () => {

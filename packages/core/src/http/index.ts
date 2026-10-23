@@ -6,9 +6,20 @@ export {
   NotFoundError,
   ConflictError,
   ValidationError,
+  ServiceUnavailableError,
   isAppError,
+  type AppErrorOptions,
   type FieldErrors,
 } from './errors';
+export { safeReturnTo } from './return-to';
+export {
+  fetchJson,
+  DEFAULT_OUTBOUND_TIMEOUT_MS,
+  type FetchJsonInit,
+  type OutboundLogger,
+  type UpstreamFailure,
+  type UpstreamFailureReason,
+} from './outbound';
 export {
   apiHandler,
   jsonOk,

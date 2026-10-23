@@ -16,7 +16,7 @@ Each phase ends with a manual-test checkpoint; the next phase starts only after 
 ## Phase 2 — Auth platform primitives (Slice 2, steps 3–9)
 
 - [x] 2.1 Clock primitive `core/src/time/clock.ts` + container/cradle registration (step 3)
-- [ ] 2.2 `ServiceUnavailableError` + `AppError.headers`, `safeReturnTo`, `fetchJson` (step 4)
+- [x] 2.2 `ServiceUnavailableError` + `AppError.headers`, `safeReturnTo`, `fetchJson` (step 4)
 - [ ] 2.3 Env vars + two-signal `superRefine` + production-secret check in `createContainer`; mirror in `.env.example`, `README.md`, `ci.yml`, integration env (step 5)
 - [ ] 2.4 `auth-identity` migration + `User` entity fields + roles CHECK + verified backfill + seeder (step 6)
 - [ ] 2.5 Token service (`jose`, purpose tokens) (step 7)

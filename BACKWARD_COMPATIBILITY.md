@@ -32,8 +32,11 @@ The shape is declared twice on purpose, in `packages/core/src/http/apiHandler.ts
 **Status and error codes**, from `packages/core/src/http/errors.ts` and `apiHandler.ts`:
 400 `bad_request`, 401 `unauthorized`, 403 `forbidden`, 404 `not_found`,
 409 `conflict`, 422 `validation_failed` (with `fieldErrors`, keyed by dotted path or
-`_root`), 500 `internal_error`. The client adds `network_error` and
-`invalid_response` in `apiCall.ts`.
+`_root`), 500 `internal_error`, 503 `service_unavailable` (`ServiceUnavailableError`:
+an integration credential is unset, an upstream call made through `fetchJson` timed
+out or failed, or a capacity gate is saturated; retryable). An `AppError` may carry
+optional `headers`, which `apiHandler` copies onto the error response. The client
+adds `network_error` and `invalid_response` in `apiCall.ts`.
 
 **Routes in place:**
 

@@ -27,10 +27,14 @@ function logger(): Logger {
   return (cachedLogger ??= createLogger());
 }
 
-function json(status: number, body: ApiResponseBody<unknown>): Response {
+function json(
+  status: number,
+  body: ApiResponseBody<unknown>,
+  headers?: Record<string, string>,
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { ...headers, 'content-type': 'application/json' },
   });
 }
 
@@ -43,11 +47,16 @@ export function jsonError(
   code: string,
   message: string,
   fieldErrors?: FieldErrors,
+  headers?: Record<string, string>,
 ): Response {
-  return json(status, {
-    ok: false,
-    error: { code, message, ...(fieldErrors ? { fieldErrors } : {}) },
-  });
+  return json(
+    status,
+    {
+      ok: false,
+      error: { code, message, ...(fieldErrors ? { fieldErrors } : {}) },
+    },
+    headers,
+  );
 }
 
 /**
@@ -65,7 +74,13 @@ export function apiHandler(logic: RouteLogic): ApiRouteHandler {
       return result instanceof Response ? result : jsonOk(result);
     } catch (error) {
       if (isAppError(error)) {
-        return jsonError(error.status, error.code, error.message, error.fieldErrors);
+        return jsonError(
+          error.status,
+          error.code,
+          error.message,
+          error.fieldErrors,
+          error.headers,
+        );
       }
       logger().error({ err: error, path: req.url }, 'unhandled route error');
       return jsonError(500, 'internal_error', 'Something went wrong');

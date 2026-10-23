@@ -11,6 +11,7 @@ import { getEnv } from '../config/env';
 import { createLogger } from '../logger';
 import { EventBus } from '../events/event-bus';
 import { UserService } from '../services/auth/user.service';
+import { systemClock } from '../time/clock';
 import type { Cradle } from './cradle';
 
 /**
@@ -35,6 +36,7 @@ async function build(): Promise<AwilixContainer<Cradle>> {
     env: asValue(getEnv()),
     logger: asFunction(createLogger).singleton(),
     orm: asValue(orm),
+    clock: asValue(systemClock),
     eventBus: asClass(EventBus).singleton(),
     // A forked EntityManager per scope gives each request its own identity map / UoW.
     em: asFunction(({ orm }: Cradle) => orm.em.fork()).scoped(),

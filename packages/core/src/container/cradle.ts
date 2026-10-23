@@ -9,6 +9,7 @@ import type { PasswordService } from '../services/auth/password.service';
 import type { SessionService } from '../services/auth/session.service';
 import type { TokenService } from '../services/auth/token.service';
 import type { UserService } from '../services/auth/user.service';
+import type { Mailer } from '../services/notifications/mailer.port';
 import type { Clock } from '../time/clock';
 
 /**
@@ -18,7 +19,7 @@ import type { Clock } from '../time/clock';
  *
  * Lifetimes:
  * - `env`, `logger`, `orm`, `clock`, `eventBus`, `sessionService`,
- *   `tokenService`, `passwordService`, `identity` — SINGLETON (shared for the process).
+ *   `tokenService`, `passwordService`, `identity`, `mailer` — SINGLETON (shared for the process).
  * - `em`, `userService`, `rateLimiter` — SCOPED (created fresh per request scope).
  * - `session` — SCOPED and lazy: a memoised `Promise<Session | null>`. The live check
  *   (cookie, user row, `session_version`, roles) runs on first resolution only, so a
@@ -40,6 +41,8 @@ export interface Cradle {
   passwordService: PasswordService;
   /** GitHub identity port: the real adapter, or the mock under the two-signal rule. */
   identity: GithubIdentityPort;
+  /** Outbound mail port: Resend, or the log mailer (harness pair or development fallback). */
+  mailer: Mailer;
   em: EntityManager;
   userService: UserService;
   /** PostgreSQL-backed fixed-window counters (B8), on the scope's `em`. */

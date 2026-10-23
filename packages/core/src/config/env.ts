@@ -79,8 +79,9 @@ const appEnvSchema = z
         .transform((value) => value === '1'),
     ),
 
-    // Mail — declared now, consumed from E01 Slice 4. Unset MAILER_ADAPTER lets
-    // development fall back to the log mailer; production uses Resend.
+    // Mail (B14). Selection lives in `createMailerAdapter`: unset MAILER_ADAPTER lets
+    // development without MAIL_API_KEY fall back to the log mailer; production requires
+    // MAIL_API_KEY and MAIL_FROM at container creation, not here (see SESSION_SECRET).
     MAILER_ADAPTER: blankAsUnset(z.enum(['resend', 'log']).optional()),
     MAIL_API_KEY: optionalText(),
     MAIL_FROM: optionalText(),

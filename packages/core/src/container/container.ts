@@ -19,6 +19,10 @@ import { PasswordService } from '../services/auth/password.service';
 import { readSessionCookie, SessionService } from '../services/auth/session.service';
 import { TokenService } from '../services/auth/token.service';
 import { UserService } from '../services/auth/user.service';
+import { LogMailer, type MailLogger } from '../services/notifications/adapters/log-mailer';
+import { ResendMailer } from '../services/notifications/adapters/resend-mailer';
+import type { Mailer } from '../services/notifications/mailer.port';
+import type { OutboundLogger } from '../http/outbound';
 import { systemClock } from '../time/clock';
 import type { Cradle } from './cradle';
 
@@ -37,8 +41,18 @@ const globalForContainer = globalThis as unknown as {
  * secrets; the container is only ever created at request time.
  */
 function assertProductionConfig(env: AppEnv): void {
-  if (env.NODE_ENV === 'production' && !env.SESSION_SECRET) {
+  if (env.NODE_ENV !== 'production') return;
+  if (!env.SESSION_SECRET) {
     throw new Error('SESSION_SECRET must be set when NODE_ENV=production');
+  }
+  // `MAILER_ADAPTER=log` is legitimate here only in the harness: the schema already
+  // refused it without INTEGRATION_TEST_RUN=1.
+  if (env.MAILER_ADAPTER !== 'log') {
+    for (const key of ['MAIL_API_KEY', 'MAIL_FROM'] as const) {
+      if (!env[key]) {
+        throw new Error(`${key} must be set when NODE_ENV=production`);
+      }
+    }
   }
 }
 
@@ -53,6 +67,28 @@ export function createIdentityAdapter(cradle: Cradle): GithubIdentityPort {
     return new MockGithubIdentityAdapter(cradle);
   }
   return new GithubIdentityAdapter(cradle);
+}
+
+export const DEV_LOG_MAILER_WARNING =
+  'MAILER_ADAPTER is unset and MAIL_API_KEY is missing: mail is written to the log, not sent';
+
+/**
+ * Mailer selection (B14):
+ * - `MAILER_ADAPTER=log` with `INTEGRATION_TEST_RUN=1` (the schema refuses the switch
+ *   alone; checked again here for a hand-built `AppEnv`) — the log mailer;
+ * - `MAILER_ADAPTER` unset, `NODE_ENV=development`, no `MAIL_API_KEY` — the log mailer
+ *   with one warning, so `npm run dev` never shows a form that always answers 503;
+ * - anything else — Resend, which fails closed per call if its key or sender is missing.
+ */
+export function createMailerAdapter(env: AppEnv, logger: MailLogger & OutboundLogger): Mailer {
+  if (env.MAILER_ADAPTER === 'log' && env.INTEGRATION_TEST_RUN) {
+    return new LogMailer({ logger });
+  }
+  if (env.MAILER_ADAPTER === undefined && env.NODE_ENV === 'development' && !env.MAIL_API_KEY) {
+    logger.warn({}, DEV_LOG_MAILER_WARNING);
+    return new LogMailer({ logger });
+  }
+  return new ResendMailer({ env, logger });
 }
 
 async function build(): Promise<AwilixContainer<Cradle>> {
@@ -78,6 +114,7 @@ async function build(): Promise<AwilixContainer<Cradle>> {
     // Singleton: its concurrency gate must be process-wide to bound hashing memory.
     passwordService: asClass(PasswordService).singleton(),
     identity: asFunction(createIdentityAdapter).singleton(),
+    mailer: asFunction(({ env, logger }: Cradle) => createMailerAdapter(env, logger)).singleton(),
     // A forked EntityManager per scope gives each request its own identity map / UoW.
     em: asFunction(({ orm }: Cradle) => orm.em.fork()).scoped(),
     userService: asClass(UserService).scoped(),
@@ -87,6 +124,9 @@ async function build(): Promise<AwilixContainer<Cradle>> {
     // `withRequestScope` overrides this key in its own scope.
     session: asFunction(() => Promise.resolve(null)).scoped(),
   });
+
+  // Resolve eagerly so the development fallback warns once at boot, not at first send.
+  void container.cradle.mailer;
 
   // Default in-process subscribers. Concept side effects (send a message, invalidate
   // a cache) register here; for now we just log so the event path is observable.

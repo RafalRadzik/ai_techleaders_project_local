@@ -28,7 +28,10 @@ export function integrationChildEnvironment(
     // A fresh, throwaway signing secret per run; production mode requires one.
     SESSION_SECRET: randomBytes(48).toString('base64'),
     // Fake adapters are accepted only together with INTEGRATION_TEST_RUN=1.
+    // The log mailer writes each message to the app log, where `waitForMail` reads it;
+    // without it production mode would require MAIL_API_KEY and MAIL_FROM.
     AUTH_IDENTITY_ADAPTER: 'mock',
+    MAILER_ADAPTER: 'log',
     INTEGRATION_TEST_RUN: '1',
     OPERATOR_EMAILS: 'mock-operator@devmentor.test',
   };

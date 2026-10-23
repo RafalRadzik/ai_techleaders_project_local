@@ -127,14 +127,15 @@ and email use:
 | `TRUSTED_PROXY_HOPS` | `0` | Number of reverse proxies whose `X-Forwarded-For` entries are trusted. |
 | `PASSWORD_HASH_CONCURRENCY` | `4` | Password hashes computed at once. Each scrypt hash uses about 128 MiB. |
 | `PASSWORD_HASH_WAIT_MS` | `5000` | How long a request waits for a free hashing slot before answering `503`. |
-| `MAILER_ADAPTER` | unset | `resend` or `log`. Email ships with E01 Slice 4; then an unset adapter in development writes mail to the log. |
-| `MAIL_API_KEY`, `MAIL_FROM` | unset | Resend API key and sender address. |
+| `MAILER_ADAPTER` | unset | `resend` or `log`. Unset in `development` with no `MAIL_API_KEY`, mail is written to the log (one `mail.sent` line per message, with a warning at boot); otherwise Resend is used. |
+| `MAIL_API_KEY`, `MAIL_FROM` | unset | Resend API key and sender address (on a domain verified in Resend). **Both required in production** unless the harness's `MAILER_ADAPTER=log` pair is set; the app refuses to serve without them. Missing elsewhere, each send fails with `503`. |
 | `AUTH_IDENTITY_ADAPTER` | `github` | `github` or `mock`. |
 | `INTEGRATION_TEST_RUN` | unset | `1` only inside the integration harness. |
 
 `AUTH_IDENTITY_ADAPTER=mock` and `MAILER_ADAPTER=log` are test adapters: the app
 refuses to start when either is set without `INTEGRATION_TEST_RUN=1`. The integration
-harness sets all three, plus a throwaway `SESSION_SECRET` and
+harness sets all three — its `waitForMail(to)` helper reads messages back from the app
+log — plus a throwaway `SESSION_SECRET` and
 `OPERATOR_EMAILS=mock-operator@devmentor.test`.
 
 ### Setting up GitHub sign-in

@@ -1,7 +1,13 @@
 import { User } from './auth/user.entity';
 import { MentorProfile } from './mentors/mentor-profile.entity';
 
-export { User, type IUser } from './auth/user.entity';
+export {
+  User,
+  USER_ROLES,
+  USER_ROLES_CHECK,
+  type IUser,
+  type UserRole,
+} from './auth/user.entity';
 export { MentorProfile, type IMentorProfile } from './mentors/mentor-profile.entity';
 export { baseProperties } from './base.entity';
 

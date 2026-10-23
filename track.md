@@ -41,7 +41,7 @@ Each phase ends with a manual-test checkpoint; the next phase starts only after 
 
 - [x] 4.1 `AppShell` (F2) reconcile with spec + three-surface taxonomy in `AGENTS.md` (step 18)
 - [x] 4.2 `app/src/lib/nav.ts` + port the three signed-in layouts to `AppShell` without touching guard calls (step 19)
-- [ ] 4.3 `expectAbsent` helper + `roles.integration.test.ts` (step 20)
+- [x] 4.3 `expectAbsent` helper + `roles.integration.test.ts` (step 20)
 
 **Checkpoint:** navigation per role/combined roles; no "become a mentor" path.
 

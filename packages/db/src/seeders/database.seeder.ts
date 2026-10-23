@@ -16,10 +16,31 @@ export const SEED_MOCK_MENTOR_EMAIL = 'mock-mentor@devmentor.test';
 /** Mock identity persona `mock-operator`; matches `OPERATOR_EMAILS` in the harness. */
 export const SEED_OPERATOR_EMAIL = 'mock-operator@devmentor.test';
 
+/**
+ * Development-only password of the seeded mentee and operator. It is public: the seeded
+ * rows exist for local development and the integration harness, never production.
+ */
+export const SEED_PASSWORD = 'devmentor-password';
+
+/**
+ * Precomputed hash of `SEED_PASSWORD`. `@devmentor/db` may not import the password service
+ * in `@devmentor/core`, so the seeder stores a fixed string in the format that service
+ * verifies:
+ *
+ *   scrypt$N=131072,r=8,p=1$<salt>$<key>
+ *
+ * with a 16-byte salt and a 64-byte derived key, both standard padded base64. Produced by
+ * `node:crypto` `scryptSync(SEED_PASSWORD, salt, 64, { N: 131072, r: 8, p: 1, maxmem: 256 MiB })`.
+ */
+export const SEED_PASSWORD_HASH =
+  'scrypt$N=131072,r=8,p=1$ghkMMAY9v+VzzypWAC6mig==$Ihy5n42aBOvAG9LHOhelGfO3I4IDpxx8pKmoi1xLrCKxzctSYEFkc1LsiSu3XUCrHfvZgir9hYekLZyMHok1Bg==';
+
 export interface SeedUser {
   readonly email: string;
   readonly displayName: string;
   readonly roles: readonly UserRole[];
+  /** Absent for GitHub-only fixtures, so that case stays testable. */
+  readonly passwordHash?: string;
   readonly mentorProfile?: {
     readonly headline: string;
     readonly bio: string;
@@ -42,6 +63,7 @@ export const SEED_USERS: readonly SeedUser[] = [
     email: SEED_MENTEE_EMAIL,
     displayName: 'Mock Mentee',
     roles: ['mentee'],
+    passwordHash: SEED_PASSWORD_HASH,
   },
   {
     email: SEED_MOCK_MENTOR_EMAIL,
@@ -53,19 +75,22 @@ export const SEED_USERS: readonly SeedUser[] = [
     email: SEED_OPERATOR_EMAIL,
     displayName: 'Mock Operator',
     roles: ['mentor', 'operator'],
+    passwordHash: SEED_PASSWORD_HASH,
   },
 ];
 
 /**
  * Default seeder — two mentors, a mentee and an operator, all with a verified email, so a
- * fresh database has something to render and every persona can sign in. Run with
- * `npm run db:seed`.
+ * fresh database has something to render and every persona can sign in. The mentee and
+ * the operator also have the password `SEED_PASSWORD`; Ada and the mock mentor stay
+ * GitHub-only. Run with `npm run db:seed`.
  *
  * Seeding is **idempotent**: `User.email` is unique and `npm run setup` re-runs this
  * seeder on every invocation, so an existing fixture row is never inserted again. It is
  * converged instead — its roles are reset to the fixture's and a missing verification
- * timestamp is filled — because the `auth-identity` migration gives rows that predate it
- * the column default `{mentee}`.
+ * timestamp or password hash is filled — because the `auth-identity` migration gives rows
+ * that predate it the column default `{mentee}` and `auth-password` gives them no hash. An
+ * existing hash is never replaced, so a developer's own password survives a re-seed.
  */
 export class DatabaseSeeder extends Seeder {
   async run(em: EntityManager): Promise<void> {
@@ -77,6 +102,7 @@ export class DatabaseSeeder extends Seeder {
       if (existing) {
         existing.roles = [...seed.roles];
         existing.emailVerifiedAt ??= now;
+        existing.passwordHash ??= seed.passwordHash ?? null;
         continue;
       }
 
@@ -85,6 +111,7 @@ export class DatabaseSeeder extends Seeder {
         displayName: seed.displayName,
         roles: [...seed.roles],
         emailVerifiedAt: now,
+        passwordHash: seed.passwordHash ?? null,
       });
 
       if (seed.mentorProfile) {

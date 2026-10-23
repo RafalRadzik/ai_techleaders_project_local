@@ -9,6 +9,7 @@ const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 const BASELINE = 'Migration20260901142829';
 const AUTH_IDENTITY = 'Migration20261023101145_auth_identity';
+const AUTH_PASSWORD = 'Migration20261023134430_auth_password';
 const AUTH_COLUMNS = [
   'avatar_url',
   'email_verified_at',
@@ -20,15 +21,22 @@ const AUTH_COLUMNS = [
 const PRE_EXISTING_EMAIL = 'founder@devmentor.dev';
 
 /**
- * TC-MIGRATION-001 — `SDLC.md` requires a schema migration to ship an up *and* down
- * test. This owns its own PostgreSQL container (the shared harness database serves the
- * running app, so reverting it would break the other scenarios) and drives the real
- * `npm run db:migrate` / `db:migrate:down` CLI: baseline, then a row that predates the
- * migration, then `up` → `down` → `up`, asserting schema and backfill each way.
+ * `SDLC.md` requires a schema migration to ship an up *and* down test. This owns its own
+ * PostgreSQL container (the shared harness database serves the running app, so reverting
+ * it would break the other scenarios) and drives the real migration CLI: baseline, then a
+ * row that predates every later migration, then `up` → `down` → `up` per migration,
+ * asserting schema and existing rows each way.
+ *
+ * TC-MIGRATION-001 covers `auth-identity` (migrated `--to` it, so later migrations stay
+ * pending); TC-MIGRATION-002 then covers `auth-password` on top of it.
  */
 describe('TC-MIGRATION-001 auth-identity migration up, down and up again', () => {
   let postgres: StartedPostgreSqlContainer | undefined;
   let environment: NodeJS.ProcessEnv;
+
+  // The root `db:migrate` script nests a second `npm run`, which would swallow `--to`.
+  const migrateTo = (name: string) =>
+    npm('run', 'migration:up', '--workspace', '@devmentor/db', '--', '--to', name);
 
   async function npm(...args: string[]): Promise<void> {
     await execFileAsync(npmExecutable, args, {
@@ -142,8 +150,7 @@ describe('TC-MIGRATION-001 auth-identity migration up, down and up again', () =>
       .start();
     environment = integrationChildEnvironment(postgres.getConnectionUri());
 
-    // The root `db:migrate` script nests a second `npm run`, which would swallow `--to`.
-    await npm('run', 'migration:up', '--workspace', '@devmentor/db', '--', '--to', BASELINE);
+    await migrateTo(BASELINE);
     expect(await executed()).toEqual([BASELINE]);
     await query(
       `insert into users (id, created_at, updated_at, email, display_name)
@@ -156,7 +163,7 @@ describe('TC-MIGRATION-001 auth-identity migration up, down and up again', () =>
   });
 
   it('up adds the columns and constraints and backfills existing rows as verified', async () => {
-    await npm('run', 'db:migrate');
+    await migrateTo(AUTH_IDENTITY);
     await expectMigratedSchema();
   }, 120_000);
 
@@ -170,7 +177,64 @@ describe('TC-MIGRATION-001 auth-identity migration up, down and up again', () =>
   }, 120_000);
 
   it('up again restores the schema and backfills once more', async () => {
-    await npm('run', 'db:migrate');
+    await migrateTo(AUTH_IDENTITY);
     await expectMigratedSchema();
   }, 120_000);
+
+  describe('TC-MIGRATION-002 auth-password migration up, down and up again', () => {
+    const passwordColumn = () =>
+      query(
+        `select column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-')
+         from information_schema.columns
+         where table_name = 'users' and column_name = 'password_hash'`,
+      );
+
+    async function expectPasswordSchema(): Promise<void> {
+      expect(await executed()).toEqual([BASELINE, AUTH_IDENTITY, AUTH_PASSWORD]);
+      expect(await passwordColumn()).toEqual(['password_hash text YES -']);
+      // The row that predates the migration survives and is GitHub-only (no hash).
+      expect(
+        await query(
+          `select display_name, password_hash is null, email_verified_at is not null
+           from users where email = '${PRE_EXISTING_EMAIL}'`,
+        ),
+      ).toEqual(['Founder|t|t']);
+      // A hash longer than bcrypt's 60 characters fits: the column is not width-pinned.
+      const hash = `scrypt$N=131072,r=8,p=1$${'s'.repeat(24)}$${'k'.repeat(88)}`;
+      expect(
+        (
+          await sql(
+            `insert into users (id, created_at, updated_at, email, display_name, password_hash)
+             values (gen_random_uuid(), now(), now(), 'password@devmentor.test', 'Password', '${hash}')`,
+          )
+        ).ok,
+      ).toBe(true);
+      expect(
+        await query(`select password_hash from users where email = 'password@devmentor.test'`),
+      ).toEqual([hash]);
+      await query(`delete from users where email <> '${PRE_EXISTING_EMAIL}'`);
+    }
+
+    it('up adds a nullable text password_hash and keeps existing rows', async () => {
+      await migrateTo(AUTH_PASSWORD);
+      await expectPasswordSchema();
+    }, 120_000);
+
+    it('down drops only password_hash and keeps the row and the auth-identity schema', async () => {
+      await query(
+        `update users set password_hash = 'scrypt$x$y$z' where email = '${PRE_EXISTING_EMAIL}'`,
+      );
+      await npm('run', 'db:migrate:down');
+
+      expect(await executed()).toEqual([BASELINE, AUTH_IDENTITY]);
+      expect(await passwordColumn()).toEqual([]);
+      expect(await authColumns()).toHaveLength(AUTH_COLUMNS.length);
+      expect(await query(`select display_name from users`)).toEqual(['Founder']);
+    }, 120_000);
+
+    it('up again restores password_hash, null for the surviving row', async () => {
+      await npm('run', 'db:migrate');
+      await expectPasswordSchema();
+    }, 120_000);
+  });
 });

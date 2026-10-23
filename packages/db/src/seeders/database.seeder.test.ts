@@ -1,4 +1,5 @@
 import type { EntityManager } from '@mikro-orm/core';
+import { scryptSync, timingSafeEqual } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { User } from '../entities/auth/user.entity';
 import { MentorProfile } from '../entities/mentors/mentor-profile.entity';
@@ -8,6 +9,8 @@ import {
   SEED_MENTOR_EMAIL,
   SEED_MOCK_MENTOR_EMAIL,
   SEED_OPERATOR_EMAIL,
+  SEED_PASSWORD,
+  SEED_PASSWORD_HASH,
   SEED_USERS,
 } from './database.seeder';
 
@@ -51,6 +54,7 @@ describe('DatabaseSeeder', () => {
       displayName: 'Ada Lovelace',
       roles: ['mentor'],
       emailVerifiedAt: NOW,
+      passwordHash: null,
     };
 
     expect(em.findOne.mock.calls).toEqual([
@@ -79,6 +83,7 @@ describe('DatabaseSeeder', () => {
           displayName: 'Mock Mentee',
           roles: ['mentee'],
           emailVerifiedAt: NOW,
+          passwordHash: SEED_PASSWORD_HASH,
         },
       ],
       [
@@ -88,6 +93,7 @@ describe('DatabaseSeeder', () => {
           displayName: 'Mock Mentor',
           roles: ['mentor'],
           emailVerifiedAt: NOW,
+          passwordHash: null,
         },
       ],
       [
@@ -97,6 +103,7 @@ describe('DatabaseSeeder', () => {
           displayName: 'Mock Operator',
           roles: ['mentor', 'operator'],
           emailVerifiedAt: NOW,
+          passwordHash: SEED_PASSWORD_HASH,
         },
       ],
     ]);
@@ -120,18 +127,31 @@ describe('DatabaseSeeder', () => {
     // Regression guard for the unique violation on `users.email` that made a second
     // `npm run db:seed` — and therefore a second `npm run setup` — fail outright.
     const verifiedAt = new Date('2026-09-01T00:00:00.000Z');
+    const ownHash = 'scrypt$N=131072,r=8,p=1$c2FsdA==$a2V5';
     const rows = {
-      [SEED_MENTOR_EMAIL]: { email: SEED_MENTOR_EMAIL, roles: ['mentor'], emailVerifiedAt: verifiedAt },
-      [SEED_MENTEE_EMAIL]: { email: SEED_MENTEE_EMAIL, roles: ['mentee'], emailVerifiedAt: verifiedAt },
+      [SEED_MENTOR_EMAIL]: {
+        email: SEED_MENTOR_EMAIL,
+        roles: ['mentor'],
+        emailVerifiedAt: verifiedAt,
+        passwordHash: null,
+      },
+      [SEED_MENTEE_EMAIL]: {
+        email: SEED_MENTEE_EMAIL,
+        roles: ['mentee'],
+        emailVerifiedAt: verifiedAt,
+        passwordHash: ownHash,
+      },
       [SEED_MOCK_MENTOR_EMAIL]: {
         email: SEED_MOCK_MENTOR_EMAIL,
         roles: ['mentor'],
         emailVerifiedAt: verifiedAt,
+        passwordHash: null,
       },
       [SEED_OPERATOR_EMAIL]: {
         email: SEED_OPERATOR_EMAIL,
         roles: ['mentor', 'operator'],
         emailVerifiedAt: verifiedAt,
+        passwordHash: SEED_PASSWORD_HASH,
       },
     };
     const em = fakeEntityManager(rows);
@@ -142,19 +162,28 @@ describe('DatabaseSeeder', () => {
     expect(em.create).not.toHaveBeenCalled();
     // An existing verification timestamp is kept, not moved to "now".
     Object.values(rows).forEach((row) => expect(row.emailVerifiedAt).toBe(verifiedAt));
+    // A hash already set — even one the developer chose — is never replaced, and the
+    // GitHub-only fixtures never gain one.
+    expect(Object.values(rows).map((row) => row.passwordHash)).toEqual([
+      null,
+      ownHash,
+      null,
+      SEED_PASSWORD_HASH,
+    ]);
   });
 
   it('converges a pre-migration Ada to the mentor role and creates only the missing rows', async () => {
     // The auth-identity migration gives rows that predate it the column default.
-    const ada: { roles: string[]; emailVerifiedAt: Date | null } = {
+    const ada: { roles: string[]; emailVerifiedAt: Date | null; passwordHash: string | null } = {
       roles: ['mentee'],
       emailVerifiedAt: null,
+      passwordHash: null,
     };
     const em = fakeEntityManager({ [SEED_MENTOR_EMAIL]: ada });
 
     await seed(em);
 
-    expect(ada).toEqual({ roles: ['mentor'], emailVerifiedAt: NOW });
+    expect(ada).toEqual({ roles: ['mentor'], emailVerifiedAt: NOW, passwordHash: null });
     expect(em.create).toHaveBeenCalledTimes(3);
     expect(em.create).not.toHaveBeenCalledWith(MentorProfile, expect.anything());
     expect(em.create.mock.calls.map(([, data]) => (data as { email: string }).email)).toEqual([
@@ -162,6 +191,41 @@ describe('DatabaseSeeder', () => {
       SEED_MOCK_MENTOR_EMAIL,
       SEED_OPERATOR_EMAIL,
     ]);
+  });
+
+  it('fills a missing hash on an existing password fixture created before auth-password', async () => {
+    const mentee: { roles: string[]; emailVerifiedAt: Date | null; passwordHash: string | null } = {
+      roles: ['mentee'],
+      emailVerifiedAt: NOW,
+      passwordHash: null,
+    };
+    const em = fakeEntityManager({ [SEED_MENTEE_EMAIL]: mentee });
+
+    await seed(em);
+
+    expect(mentee.passwordHash).toBe(SEED_PASSWORD_HASH);
+  });
+
+  it('stores the documented scrypt format, and the hash verifies the seed password', () => {
+    // The format the core password service verifies; db cannot import it, so the
+    // contract is pinned here.
+    const match = /^scrypt\$N=131072,r=8,p=1\$([A-Za-z0-9+/]+=*)\$([A-Za-z0-9+/]+=*)$/.exec(
+      SEED_PASSWORD_HASH,
+    );
+    expect(match).not.toBeNull();
+    const salt = Buffer.from(match![1]!, 'base64');
+    const key = Buffer.from(match![2]!, 'base64');
+    expect(salt).toHaveLength(16);
+    expect(key).toHaveLength(64);
+    expect(SEED_PASSWORD.length).toBeGreaterThanOrEqual(12);
+
+    const derived = scryptSync(SEED_PASSWORD, salt, 64, {
+      N: 131072,
+      r: 8,
+      p: 1,
+      maxmem: 256 * 1024 * 1024,
+    });
+    expect(timingSafeEqual(derived, key)).toBe(true);
   });
 
   it('follows the <login>@devmentor.test rule for the mock personas', () => {

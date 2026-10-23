@@ -42,6 +42,9 @@ export const User = defineSingletonEntity('User', () =>
       avatarUrl: p.text().nullable(),
       emailVerifiedAt: p.datetime().nullable(),
       sessionVersion: p.integer().default(0),
+      // `text`, not `varchar(60)`: the width must not pin the column to one algorithm.
+      // `hidden` keeps it out of `toObject()`/`toJSON()`; null means GitHub-only.
+      passwordHash: p.text().nullable().hidden(),
       // Per-property thunk so the cross-entity reference is resolved lazily at
       // discovery time, avoiding the circular-import pitfall between the two files.
       mentorProfile: () => p.oneToOne(MentorProfile).mappedBy('user').nullable(),

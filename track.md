@@ -1,6 +1,6 @@
 # Implementation tracker — Accounts and Roles (E01)
 
-Spec: `.ai/specs/2026-09-04-accounts-and-roles.md`
+Spec: `.ai/specs/implemented/2026-09-04-accounts-and-roles.md`
 Branch: `feat/e01-accounts-and-roles`
 
 Legend: `[ ]` todo · `[x]` done. Step numbers refer to the spec's Implementation Plan.

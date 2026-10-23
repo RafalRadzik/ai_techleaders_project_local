@@ -135,6 +135,25 @@ refuses to start when either is set without `INTEGRATION_TEST_RUN=1`. The integr
 harness sets all three, plus a throwaway `SESSION_SECRET` and
 `OPERATOR_EMAILS=mock-operator@devmentor.test`.
 
+### Setting up GitHub sign-in
+
+1. On GitHub, open **Settings → Developer settings → OAuth Apps → New OAuth App**.
+2. Set **Homepage URL** to your `APP_URL` (locally `http://localhost:3000`) and
+   **Authorization callback URL** to `${APP_URL}/api/auth/github/callback`.
+3. Copy the client ID and a generated client secret into `.env` as
+   `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`.
+4. Generate a session secret with `openssl rand -base64 48` and set it as
+   `SESSION_SECRET`.
+5. Put your GitHub account's verified email in `OPERATOR_EMAILS` if you want the
+   operator role.
+
+Restart `npm run dev`, open `/sign-in` and choose GitHub. After sign-in you land on
+your role's home: `/admin` for operators, `/mentor` for mentors, `/home` for mentees.
+
+There is no local sign-in without GitHub. The mock identity adapter works only
+inside the integration harness (it needs `INTEGRATION_TEST_RUN=1`), so a development
+server without the GitHub variables shows sign-in as unavailable.
+
 ## Scripts
 
 | Command | Description |

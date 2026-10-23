@@ -133,6 +133,10 @@ the reference example every new concept copies. See
 
 - Copy `.env.example` to `.env`. `.env` is git-ignored; defaults match
   `docker-compose.yml` (`devmentor` / `devmentor` / `devmentor`).
+- Sign-in needs `SESSION_SECRET` (≥ 32 chars; required at boot in production),
+  `GITHUB_CLIENT_ID`/`GITHUB_CLIENT_SECRET`, `APP_URL` and `OPERATOR_EMAILS`. Unset
+  secrets make sign-in fail closed in development; the app still boots. See
+  `README.md` → Configuration.
 - All env access funnels through zod schemas — `@devmentor/core` (`config/env.ts`) for
   the app, `@devmentor/db` (`env.ts`) for the MikroORM CLI. **Nothing under `packages/`
   reads `process.env` directly.** There are exactly two documented exceptions, both
@@ -179,6 +183,25 @@ the reference example every new concept copies. See
   lists use `DataTable`, and loading/error/empty states use the `feedback/` components.
 - **Collection routes are non-dynamic**, so Next passes no `params` — CRUD helpers
   guard `ctx.params` before reading it.
+- **Navigated vs fetched routes.** A `GET` the browser navigates to (OAuth start and
+  callback, later email verification) catches its own failures and returns a 302
+  `Response` — built with `redirectResponse(location, cookies)` from
+  `@devmentor/core`, i.e. `new Response(null, { status: 302, headers })`, because
+  `Response.redirect()` cannot set a cookie — which `apiHandler` passes through. It
+  never answers with a JSON envelope. Routes called through `apiCall` return the
+  envelope.
+- **Every state-changing route is JSON-only**, called through `apiCall`, `CrudForm`
+  or `WorkflowAction`, never a native HTML form post. `apiHandler` enforces the CSRF
+  header `x-devmentor-request` on every non-`GET`/`HEAD`/`OPTIONS` request; routes
+  never call `requireCsrfHeader` themselves. `apiHandler(logic, { csrf: false })` is
+  reserved for the payments webhook route.
+- **Guard at the page and the service, not only the layout.** Every guarded
+  `page.tsx` *and* its `layout.tsx` call `requirePageRole`/`requirePageSession` from
+  `packages/app/src/lib/session.ts`; services re-check with the scoped `session` from
+  the `Cradle`. A layout does not re-run on client navigation between its pages.
+- **Fake adapters need two signals.** `AUTH_IDENTITY_ADAPTER=mock` (and later
+  `MAILER_ADAPTER=log`) is honoured only together with `INTEGRATION_TEST_RUN=1`; the
+  env schema refuses to start otherwise. Never add a fake adapter selected by one flag.
 
 ### Design-system rules confirmed by the user
 

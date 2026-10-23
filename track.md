@@ -33,7 +33,7 @@ Each phase ends with a manual-test checkpoint; the next phase starts only after 
 - [x] 3.4 Auth routes: `/api/auth/github`, `/callback`, `/logout` (step 14)
 - [x] 3.5 Page guards `app/src/lib/session.ts`, sign-out `WorkflowAction`, ESLint third-party boundaries (step 15)
 - [x] 3.6 Pages: `/sign-in`, `(mentee)/home`, `(mentor)/mentor`, guarded admin pages; `signInAs` + `auth.integration.test.ts`; admin test signs in (step 16)
-- [ ] 3.7 Docs: `AGENTS.md`, `README.md`, `BACKWARD_COMPATIBILITY.md`, `CODE_REVIEW.md`, `base.entity.ts` docblock (step 17)
+- [x] 3.7 Docs: `AGENTS.md`, `README.md`, `BACKWARD_COMPATIBILITY.md`, `CODE_REVIEW.md`, `base.entity.ts` docblock (step 17)
 
 **Checkpoint:** sign in with GitHub (or mock persona), land on role home, sign out, `/admin` refused for non-operators.
 

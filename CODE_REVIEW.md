@@ -82,6 +82,11 @@ Read the diff in this order. A finding higher on the list outranks everything be
   token claims alone. Routes never call `requireCsrfHeader` — `apiHandler` enforces
   `x-devmentor-request` on every non-`GET`/`HEAD`/`OPTIONS` request, and
   `{ csrf: false }` is acceptable only on the webhook route.
+- A guarded page enforces at the page and the service, not only at the layout. Every
+  guarded `page.tsx` *and* its `layout.tsx` call `requirePageRole` /
+  `requirePageSession` from `packages/app/src/lib/session.ts`, and the service it
+  reads through re-checks the scoped `session` from the `Cradle`. A layout does not
+  re-run on client navigation between its pages, so a layout-only check is a blocker.
 - Collection routes are non-dynamic, so Next passes no `params`; helpers guard
   `ctx.params` before reading it (see `.ai/lessons.md`, 2026-09-02).
 - Request-scoped work goes through `withRequestScope(req, fn)` (or `withScope(fn)` for
@@ -182,7 +187,8 @@ both locally (Docker plus `npm run test:browser:install`) before review.
 
 ## Severity guidance
 
-- **Blocker** (the PR cannot merge as-is): any item under Security above; a
+- **Blocker** (the PR cannot merge as-is): any item under Security above; a guarded
+  page enforced only at its layout, not at the page and the service; a
   dependency-direction violation or a loosened ESLint boundary; a protected surface
   changed without the path `BACKWARD_COMPATIBILITY.md` requires; a failing validation
   gate; new or changed behavior without unit tests, or a production file missing from

@@ -51,6 +51,16 @@ adds `network_error` and `invalid_response` in `apiCall.ts`.
   public until E01 (accounts and roles); `POST /api/users` (`{ email, displayName }`) was
   removed at the same time — it had no in-repo caller, and accounts are now created only
   by the sign-in flows.
+- `GET /api/auth/github` and `GET /api/auth/github/callback` (added in E01, additive):
+  browser-navigated, not enveloped. Every outcome is a 302 built with
+  `redirectResponse`: the start route sets the `devmentor_oauth_state` cookie and
+  redirects to GitHub; the callback redirects to the role's home (or a safe
+  `returnTo`) with the `devmentor_session` cookie, or to `/sign-in?error=<code>` on any
+  failure.
+- `POST /api/auth/logout` (added in E01, additive): enveloped, CSRF-checked, no session
+  required. Always answers `{ ok: true, data: null }` with an expiring
+  `devmentor_session` cookie; a live session also has its `session_version` bumped,
+  which revokes every copy of the cookie.
 - `makeCrudRoute` behavior asserted by `packages/core/src/http/makeCrudRoute.test.ts`:
   the default id parameter `id`, and the messages "This operation is not supported",
   "Missing resource id", and "Request body must be valid JSON".
@@ -74,7 +84,7 @@ API between packages. `npm run typecheck` is the consumer check.
   `./validators/*`): `getEnv`, `createLogger`, `getContainer`, `withScope`,
   `withRequestScope(req, fn)`, `withSessionCookieScope(cookieValue, fn)`, the
   `Cradle` keys (`env`, `logger`, `orm`, `clock`, `eventBus`, `sessionService`,
-  `tokenService`, `em`, `userService`, and the scoped, lazy
+  `tokenService`, `identity`, `em`, `userService`, and the scoped, lazy
   `session: Promise<Session | null>`), `UserService` and `UserDto`, the `AppError`
   family and `isAppError`, `apiHandler(logic, { csrf? })` with `ApiHandlerOptions`,
   `jsonOk`, `jsonError`, `makeCrudRoute` with `CrudService` and
@@ -82,7 +92,21 @@ API between packages. `npm run typecheck` is the consumer check.
   `requireCsrfHeader`, `CSRF_HEADER_NAME`, `assertOwnership`, `Session`
   (`{ userId, roles: readonly [Role, ...Role[]] }`), `Role`
   (`'mentee' | 'mentor' | 'operator'`), `EventBus`, `EventMap`, and the re-exported
-  `checkDbConnection`. `requireSession(req, cradle)` replaced the
+  `checkDbConnection`. Added in E01 (additive): `ServiceUnavailableError`;
+  `systemClock` and `Clock`; `SessionService` (`SESSION_COOKIE_NAME`,
+  `readSessionCookie`, `SessionClaims`, `IssuedSession`) and `TokenService`
+  (`PurposeTokenClaims`, `SignPurposeTokenInput`); the GitHub identity port
+  (`GithubIdentityPort`, `GithubIdentity`, `GITHUB_CALLBACK_PATH`,
+  `githubCallbackUrl`, `NoVerifiedEmailError`); the OAuth state helpers
+  (`createOauthState`, `verifyOauthState`, `clearOauthStateCookie`,
+  `OAUTH_STATE_COOKIE_NAME`, ...); the sign-in redirect helpers (`SIGN_IN_PATH`,
+  `SIGN_IN_ERRORS`, `signInErrorLocation`, `signInFailure`); `homeFor` (the single
+  landing decision: `operator → /admin`, `mentor → /mentor`, else `/home`) and
+  `liveRoles`; the cookie helpers `readCookie`, `serializeCookie`, `redirectResponse`
+  with `CookieAttributes`; `fetchJson` (the outbound-call wrapper with a timeout,
+  `DEFAULT_OUTBOUND_TIMEOUT_MS`); `safeReturnTo`; and on `UserService`,
+  `AccountNotLinkedError`, `LastRoleError`, `RoleChange`, `AssignableRole`.
+  `requireSession(req, cradle)` replaced the
   stubbed `requireSession(req)`, `Session.roles` replaced `Session.role`, `student`
   became `mentee`, and the unverified `readSession` was removed — the only way to
   obtain a `Session` is the live check (cookie, user row, `session_version`, stored
@@ -174,7 +198,9 @@ maintainer updates the ruleset before the PR merges, otherwise the PR blocks its
 ### 6. Domain events (`packages/core/src/events/event-map.ts`)
 
 Event ids follow `concept.entity.action`. Today: `auth.user.created` with payload
-`{ userId, email }`, subscribed in `packages/core/src/container/container.ts`.
+`{ userId, email }`, and `auth.user.roles_changed` with payload
+`{ userId, roles, previousRoles }` (added in E01, additive), both subscribed in
+`packages/core/src/container/container.ts`.
 
 **Breaking:** renaming an event id; removing or retyping a payload field.
 
@@ -184,7 +210,9 @@ PR; adding a payload field is additive.
 ### 7. Session and CSRF conventions
 
 The session cookie name `devmentor_session` lives in
-`packages/core/src/services/auth/session.service.ts`; the `Role` union
+`packages/core/src/services/auth/session.service.ts`. The short-lived OAuth state cookie
+`devmentor_oauth_state` (path `/api/auth/github`, 10 minutes, added in E01) lives in
+`packages/core/src/services/auth/oauth-state.ts`. The `Role` union
 (`'mentee' | 'mentor' | 'operator'`) and the CSRF header name live in
 `packages/core/src/http/auth.ts`. The CSRF header `x-devmentor-request` is set by
 `apiCall` in `packages/ui/src/backend/api/apiCall.ts` on every request and is
@@ -195,7 +223,7 @@ only opt-out, `apiHandler(logic, { csrf: false })`, is reserved for the webhook 
 Every state-changing route is therefore JSON-only and called through `apiCall` or
 `CrudForm`, never a native HTML form.
 
-**Breaking:** renaming the cookie or the header, changing the `Role` values, or
+**Breaking:** renaming either cookie or the header, changing the `Role` values, or
 relaxing which methods require the header.
 
 **Required path:** change `core/src/http/auth.ts` and `ui/src/backend/api/apiCall.ts`

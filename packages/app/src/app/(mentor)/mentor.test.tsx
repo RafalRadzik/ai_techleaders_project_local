@@ -1,6 +1,7 @@
-import { EmptyState } from '@devmentor/ui/backend';
+import { AppShell, EmptyState } from '@devmentor/ui/backend';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SignedInFrame } from '../../components/shell/SignedInFrame';
+import { SignOutButton } from '../../components/auth/SignOutButton';
+import { NavLinks } from '../../components/shell/NavLinks';
 import { findByType, textOf } from '../../test/element-tree';
 
 vi.mock('../../lib/session', () => ({
@@ -20,18 +21,28 @@ beforeEach(() => {
 });
 
 describe('(mentor)/layout', () => {
-  it('guards for mentor, then renders the mentor frame around the page', async () => {
+  it('guards for mentor, then renders AppShell with the mentor nav, name and sign-out', async () => {
     vi.mocked(requirePageRole).mockResolvedValue({ userId: 'u1', roles: ['mentor'] });
+    vi.mocked(requirePageUser).mockResolvedValue({
+      session: { userId: 'u1', roles: ['mentor'] },
+      user: { displayName: 'Mock Mentor' } as never,
+    });
     const child = <p>page</p>;
     const tree = await MentorLayout({ children: child });
     expect(requirePageRole).toHaveBeenCalledWith('mentor', '/mentor');
-    expect(tree.type).toBe(SignedInFrame);
-    expect(tree.props).toEqual({ surface: 'Mentor', children: child });
+    expect(requirePageUser).toHaveBeenCalledWith('mentor', '/mentor');
+    expect(tree.type).toBe(AppShell);
+    expect(tree.props.user).toEqual({ displayName: 'Mock Mentor' });
+    expect(tree.props.nav.type).toBe(NavLinks);
+    expect(tree.props.nav.props.items).toEqual([{ href: '/mentor', label: 'Mentor workspace' }]);
+    expect(tree.props.actions.type).toBe(SignOutButton);
+    expect(tree.props.children).toBe(child);
   });
 
   it('renders nothing when the guard redirects', async () => {
     vi.mocked(requirePageRole).mockRejectedValue(denied);
     await expect(MentorLayout({ children: <p>page</p> })).rejects.toBe(denied);
+    expect(requirePageUser).not.toHaveBeenCalled();
   });
 });
 

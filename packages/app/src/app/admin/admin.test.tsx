@@ -1,17 +1,18 @@
 import { Card } from '@devmentor/ui';
-import Link from 'next/link';
+import { AppShell } from '@devmentor/ui/backend';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SignOutButton } from '../../components/auth/SignOutButton';
+import { NavLinks } from '../../components/shell/NavLinks';
 import { allElements, findByType, textOf } from '../../test/element-tree';
 import { UsersTable } from './users/UsersTable';
 
-vi.mock('../../lib/session', () => ({ requirePageRole: vi.fn() }));
+vi.mock('../../lib/session', () => ({ requirePageRole: vi.fn(), requirePageUser: vi.fn() }));
 vi.mock('@devmentor/core', () => ({
   getEnv: vi.fn(() => ({ APP_NAME: 'DevMentor', NODE_ENV: 'production' })),
   checkDbConnection: vi.fn(),
 }));
 
-const { requirePageRole } = await import('../../lib/session');
+const { requirePageRole, requirePageUser } = await import('../../lib/session');
 const { checkDbConnection } = await import('@devmentor/core');
 const { default: AdminLayout } = await import('./layout');
 const { default: AdminDashboard } = await import('./page');
@@ -22,27 +23,34 @@ const denied = new Error('REDIRECT sentinel');
 
 beforeEach(() => {
   vi.mocked(requirePageRole).mockReset().mockResolvedValue(operator);
+  vi.mocked(requirePageUser)
+    .mockReset()
+    .mockResolvedValue({ session: operator, user: { displayName: 'Mock Operator' } as never });
   vi.mocked(checkDbConnection).mockReset();
 });
 
 describe('admin/layout', () => {
-  it('guards for operator, then keeps the chrome: nav with "Users" plus sign-out', async () => {
+  it('guards for operator, then renders AppShell with every held surface, "Users" included', async () => {
     const child = <p>page</p>;
     const tree = await AdminLayout({ children: child });
     expect(requirePageRole).toHaveBeenCalledWith('operator', '/admin');
-    const links = findByType(tree, Link).map((link) => [textOf(link), link.props.href]);
-    expect(links).toEqual([
-      ['DevMentor', '/'],
-      ['Dashboard', '/admin'],
-      ['Users', '/admin/users'],
+    expect(requirePageUser).toHaveBeenCalledWith('operator', '/admin');
+    expect(tree.type).toBe(AppShell);
+    expect(tree.props.user).toEqual({ displayName: 'Mock Operator' });
+    const nav = findByType(tree.props.nav, NavLinks)[0]!;
+    expect(nav.props.items).toEqual([
+      { href: '/mentor', label: 'Mentor workspace' },
+      { href: '/admin', label: 'Operator home' },
+      { href: '/admin/users', label: 'Users' },
     ]);
-    expect(findByType(tree, SignOutButton)).toHaveLength(1);
-    expect(findByType(tree, 'main')[0]!.props.children).toBe(child);
+    expect(findByType(tree.props.actions, SignOutButton)).toHaveLength(1);
+    expect(tree.props.children).toBe(child);
   });
 
   it('renders nothing when the guard redirects', async () => {
     vi.mocked(requirePageRole).mockRejectedValue(denied);
     await expect(AdminLayout({ children: <p>page</p> })).rejects.toBe(denied);
+    expect(requirePageUser).not.toHaveBeenCalled();
   });
 });
 

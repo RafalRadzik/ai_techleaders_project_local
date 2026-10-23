@@ -38,6 +38,8 @@ describe('parseAppEnv', () => {
       APP_URL: 'http://localhost:3000',
       OPERATOR_EMAILS: [],
       TRUSTED_PROXY_HOPS: 0,
+      PASSWORD_HASH_CONCURRENCY: 4,
+      PASSWORD_HASH_WAIT_MS: 5000,
       AUTH_IDENTITY_ADAPTER: 'github',
       INTEGRATION_TEST_RUN: false,
     });
@@ -107,6 +109,24 @@ describe('parseAppEnv', () => {
     expect(issuesFor({ OPERATOR_EMAILS: 'founder@devmentor.test,not-an-email' })).toEqual([
       expect.objectContaining({ path: 'OPERATOR_EMAILS.1' }),
     ]);
+  });
+
+  it('parses the password hashing gate settings, blanks falling back to defaults', () => {
+    expect(
+      parseAppEnv({ PASSWORD_HASH_CONCURRENCY: '2', PASSWORD_HASH_WAIT_MS: '0' }),
+    ).toMatchObject({ PASSWORD_HASH_CONCURRENCY: 2, PASSWORD_HASH_WAIT_MS: 0 });
+    expect(
+      parseAppEnv({ PASSWORD_HASH_CONCURRENCY: '', PASSWORD_HASH_WAIT_MS: '' }),
+    ).toMatchObject({ PASSWORD_HASH_CONCURRENCY: 4, PASSWORD_HASH_WAIT_MS: 5000 });
+  });
+
+  it.each([
+    ['PASSWORD_HASH_CONCURRENCY', '0'],
+    ['PASSWORD_HASH_CONCURRENCY', '1.5'],
+    ['PASSWORD_HASH_WAIT_MS', '-1'],
+    ['PASSWORD_HASH_WAIT_MS', 'soon'],
+  ])('rejects %s=%s', (key, value) => {
+    expect(issuesFor({ [key]: value })).toEqual([expect.objectContaining({ path: key })]);
   });
 
   it.each(['-1', '1.5', 'many'])('rejects TRUSTED_PROXY_HOPS=%s', (hops) => {

@@ -3,6 +3,7 @@ import { requireSession } from '../http/auth';
 import { ForbiddenError, UnauthorizedError } from '../http/errors';
 import { GithubIdentityAdapter } from '../services/auth/adapters/github-identity';
 import { MockGithubIdentityAdapter } from '../services/auth/adapters/mock-github-identity';
+import { PasswordService } from '../services/auth/password.service';
 import { SessionService } from '../services/auth/session.service';
 import { TokenService } from '../services/auth/token.service';
 import { systemClock } from '../time/clock';
@@ -98,6 +99,22 @@ describe('getContainer', () => {
     expect(expiresAt.getTime()).toBeGreaterThan(Date.now());
     const token = cookie.split(';')[0]?.slice('devmentor_session='.length) ?? '';
     await expect(sessionService.verify(token)).resolves.toEqual({ userId: 'u1', sessionVersion: 0 });
+  });
+
+  it('registers one process-wide password service whose gate is sized by env', async () => {
+    envState.overrides = { PASSWORD_HASH_CONCURRENCY: '1', PASSWORD_HASH_WAIT_MS: '0' };
+    const container = await getContainer();
+    const { passwordService } = container.cradle;
+    expect(passwordService).toBeInstanceOf(PasswordService);
+    expect(container.createScope().cradle.passwordService).toBe(passwordService);
+
+    let finish!: () => void;
+    const held = passwordService.withSlot(() => new Promise<void>((resolve) => (finish = resolve)));
+    await expect(passwordService.withSlot(async () => 'second')).rejects.toMatchObject({
+      status: 503,
+    });
+    finish();
+    await held;
   });
 
   it('logs auth.user.created through the default subscriber', async () => {

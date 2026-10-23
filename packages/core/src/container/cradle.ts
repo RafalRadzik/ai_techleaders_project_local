@@ -4,6 +4,7 @@ import type { Session } from '../http/auth';
 import type { Logger } from '../logger';
 import type { EventBus } from '../events/event-bus';
 import type { GithubIdentityPort } from '../services/auth/github-identity.port';
+import type { PasswordService } from '../services/auth/password.service';
 import type { SessionService } from '../services/auth/session.service';
 import type { TokenService } from '../services/auth/token.service';
 import type { UserService } from '../services/auth/user.service';
@@ -16,7 +17,7 @@ import type { Clock } from '../time/clock';
  *
  * Lifetimes:
  * - `env`, `logger`, `orm`, `clock`, `eventBus`, `sessionService`,
- *   `tokenService`, `identity` — SINGLETON (shared for the process).
+ *   `tokenService`, `passwordService`, `identity` — SINGLETON (shared for the process).
  * - `em`, `userService` — SCOPED (created fresh per request scope).
  * - `session` — SCOPED and lazy: a memoised `Promise<Session | null>`. The live check
  *   (cookie, user row, `session_version`, roles) runs on first resolution only, so a
@@ -34,6 +35,8 @@ export interface Cradle {
   eventBus: EventBus;
   sessionService: SessionService;
   tokenService: TokenService;
+  /** scrypt hashing behind the process-wide concurrency gate (B9). */
+  passwordService: PasswordService;
   /** GitHub identity port: the real adapter, or the mock under the two-signal rule. */
   identity: GithubIdentityPort;
   em: EntityManager;

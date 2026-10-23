@@ -9,7 +9,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./entities": "./src/entities/index.ts",
-    "./config": "./src/config.ts"
+    "./config": "./src/config.ts",
+    "./seeders": "./src/seeders/database.seeder.ts"
   },
   "scripts": {
     "migration:create": "mikro-orm migration:create",

@@ -48,7 +48,7 @@ Each phase ends with a manual-test checkpoint; the next phase starts only after 
 ## Phase 5 — Email and password (Slice 4, steps 21–28)
 
 - [x] 5.1 `auth-password` migration + `passwordHash` + seeder hashes (step 21)
-- [ ] 5.2 Password service (scrypt + concurrency gate); amend standards spec (step 22)
+- [x] 5.2 Password service (scrypt + concurrency gate); amend standards spec (step 22)
 - [ ] 5.3 Rate limiter + `TooManyRequestsError` + `AuthRateLimit` entity/migration (step 23)
 - [ ] 5.4 Mailer port + Resend/log adapters + `waitForMail` (step 24)
 - [ ] 5.5 Email verification service (step 25)

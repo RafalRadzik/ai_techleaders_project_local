@@ -125,6 +125,8 @@ and email use:
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | unset | GitHub OAuth app. When unset, GitHub sign-in fails closed; the app still boots. |
 | `OPERATOR_EMAILS` | empty | Comma-separated operator allowlist, trimmed and case-insensitive. |
 | `TRUSTED_PROXY_HOPS` | `0` | Number of reverse proxies whose `X-Forwarded-For` entries are trusted. |
+| `PASSWORD_HASH_CONCURRENCY` | `4` | Password hashes computed at once. Each scrypt hash uses about 128 MiB. |
+| `PASSWORD_HASH_WAIT_MS` | `5000` | How long a request waits for a free hashing slot before answering `503`. |
 | `MAILER_ADAPTER` | unset | `resend` or `log`. Email ships with E01 Slice 4; then an unset adapter in development writes mail to the log. |
 | `MAIL_API_KEY`, `MAIL_FROM` | unset | Resend API key and sender address. |
 | `AUTH_IDENTITY_ADAPTER` | `github` | `github` or `mock`. |

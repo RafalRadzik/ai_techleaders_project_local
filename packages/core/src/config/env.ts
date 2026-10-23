@@ -64,6 +64,12 @@ const appEnvSchema = z
     OPERATOR_EMAILS: operatorEmails,
     TRUSTED_PROXY_HOPS: blankAsUnset(z.coerce.number().int().min(0).default(0)),
 
+    // Password hashing gate (B9). Each scrypt hash holds ~128 MiB, so this bounds memory;
+    // 4 matches libuv's default threadpool size. Callers past the limit wait up to
+    // PASSWORD_HASH_WAIT_MS, then get a 503.
+    PASSWORD_HASH_CONCURRENCY: blankAsUnset(z.coerce.number().int().min(1).default(4)),
+    PASSWORD_HASH_WAIT_MS: blankAsUnset(z.coerce.number().int().min(0).default(5000)),
+
     // Test adapters are selected only together with INTEGRATION_TEST_RUN=1.
     AUTH_IDENTITY_ADAPTER: blankAsUnset(z.enum(['github', 'mock']).default('github')),
     INTEGRATION_TEST_RUN: blankAsUnset(

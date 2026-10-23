@@ -14,6 +14,7 @@ import { EventBus } from '../events/event-bus';
 import { GithubIdentityAdapter } from '../services/auth/adapters/github-identity';
 import { MockGithubIdentityAdapter } from '../services/auth/adapters/mock-github-identity';
 import type { GithubIdentityPort } from '../services/auth/github-identity.port';
+import { PasswordService } from '../services/auth/password.service';
 import { readSessionCookie, SessionService } from '../services/auth/session.service';
 import { TokenService } from '../services/auth/token.service';
 import { UserService } from '../services/auth/user.service';
@@ -73,6 +74,8 @@ async function build(): Promise<AwilixContainer<Cradle>> {
     eventBus: asClass(EventBus).singleton(),
     sessionService: asClass(SessionService).singleton(),
     tokenService: asClass(TokenService).singleton(),
+    // Singleton: its concurrency gate must be process-wide to bound hashing memory.
+    passwordService: asClass(PasswordService).singleton(),
     identity: asFunction(createIdentityAdapter).singleton(),
     // A forked EntityManager per scope gives each request its own identity map / UoW.
     em: asFunction(({ orm }: Cradle) => orm.em.fork()).scoped(),

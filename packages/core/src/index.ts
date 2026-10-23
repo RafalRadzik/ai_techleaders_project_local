@@ -16,6 +16,16 @@ export {
   type SessionClaims,
 } from './services/auth/session.service';
 export {
+  PasswordService,
+  SCRYPT_KEY_LENGTH,
+  SCRYPT_MAXMEM,
+  SCRYPT_N,
+  SCRYPT_P,
+  SCRYPT_R,
+  SCRYPT_SALT_LENGTH,
+  type PasswordHashingSlot,
+} from './services/auth/password.service';
+export {
   TokenService,
   type PurposeTokenClaims,
   type SignPurposeTokenInput,

@@ -27,6 +27,7 @@ export {
   type ApiSuccess,
   type ApiFailure,
   type ApiResponseBody,
+  type ApiHandlerOptions,
   type ApiRouteContext,
   type ApiRouteHandler,
   type RouteLogic,
@@ -37,9 +38,10 @@ export {
   type MakeCrudRouteOptions,
 } from './makeCrudRoute';
 export {
-  readSession,
+  CSRF_HEADER_NAME,
   requireSession,
   requireRole,
+  requireCsrfHeader,
   assertOwnership,
   type Session,
   type Role,

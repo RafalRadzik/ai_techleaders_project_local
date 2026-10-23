@@ -25,6 +25,7 @@ export default defineConfig({
         'packages/core/src/config/env.ts',
         'packages/core/src/container/container.ts',
         'packages/core/src/http/apiHandler.ts',
+        'packages/core/src/http/auth.ts',
         'packages/core/src/http/errors.ts',
         'packages/core/src/http/makeCrudRoute.ts',
         'packages/core/src/http/outbound.ts',

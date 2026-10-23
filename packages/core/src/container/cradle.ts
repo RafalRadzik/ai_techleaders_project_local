@@ -1,5 +1,6 @@
 import type { EntityManager, MikroORM } from '@devmentor/db';
 import type { AppEnv } from '../config/env';
+import type { Session } from '../http/auth';
 import type { Logger } from '../logger';
 import type { EventBus } from '../events/event-bus';
 import type { SessionService } from '../services/auth/session.service';
@@ -16,6 +17,10 @@ import type { Clock } from '../time/clock';
  * - `env`, `logger`, `orm`, `clock`, `eventBus`, `sessionService`,
  *   `tokenService` — SINGLETON (shared for the process).
  * - `em`, `userService` — SCOPED (created fresh per request scope).
+ * - `session` — SCOPED and lazy: a memoised `Promise<Session | null>`. The live check
+ *   (cookie, user row, `session_version`, roles) runs on first resolution only, so a
+ *   route guard and a service in one scope share one user lookup. `null` outside
+ *   `withRequestScope`/`withSessionCookieScope` and for any signed-out request.
  *
  * As services grow to ~9 concepts, each new one is a new explicit line here and in
  * `container.ts` — never auto-discovered from a folder scan.
@@ -30,4 +35,5 @@ export interface Cradle {
   tokenService: TokenService;
   em: EntityManager;
   userService: UserService;
+  session: Promise<Session | null>;
 }

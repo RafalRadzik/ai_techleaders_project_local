@@ -21,7 +21,7 @@ Each phase ends with a manual-test checkpoint; the next phase starts only after 
 - [x] 2.4 `auth-identity` migration + `User` entity fields + roles CHECK + verified backfill + seeder (step 6)
 - [x] 2.5 Token service (`jose`, purpose tokens) (step 7)
 - [x] 2.6 Session service (issue/verify/clear, hand-rolled cookie) (step 8)
-- [ ] 2.7 Live `requireSession`, `Role` rename + `roles` set, `withRequestScope` + scoped `session`, CSRF in `apiHandler`; BACKWARD_COMPATIBILITY §2/§7 (step 9)
+- [x] 2.7 Live `requireSession`, `Role` rename + `roles` set, `withRequestScope` + scoped `session`, CSRF in `apiHandler`; BACKWARD_COMPATIBILITY §2/§7 (step 9)
 
 **Checkpoint:** unit tests + coverage green; `npm run db:migrate` / `db:migrate:down` / `db:seed` work locally; app still boots and `/` renders.
 

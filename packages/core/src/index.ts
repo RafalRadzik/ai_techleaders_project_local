@@ -1,7 +1,13 @@
 export { getEnv, type AppEnv } from './config/env';
 export { createLogger, type Logger } from './logger';
 export { systemClock, type Clock } from './time/clock';
-export { getContainer, withScope, type Cradle } from './container/index';
+export {
+  getContainer,
+  withRequestScope,
+  withScope,
+  withSessionCookieScope,
+  type Cradle,
+} from './container/index';
 export {
   readSessionCookie,
   SESSION_COOKIE_NAME,

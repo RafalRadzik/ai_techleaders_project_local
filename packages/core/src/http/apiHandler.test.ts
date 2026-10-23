@@ -7,6 +7,9 @@ const testState = vi.hoisted(() => ({
   createLogger: vi.fn(),
 }));
 
+// auth.ts imports the User entity; keep @mikro-orm/* out of this unit graph.
+vi.mock('@devmentor/db', () => ({ User: {}, USER_ROLES: ['mentee', 'mentor', 'operator'] }));
+
 vi.mock('../logger', () => ({
   createLogger: testState.createLogger,
 }));
@@ -122,5 +125,51 @@ describe('apiHandler', () => {
     );
     expect(testState.error).toHaveBeenCalledTimes(2);
     expect(testState.createLogger).toHaveBeenCalledTimes(1);
+  });
+
+  describe('CSRF', () => {
+    const mutating = (method: string, headers: Record<string, string> = {}) =>
+      new Request('http://devmentor.test/api/things', { method, headers });
+
+    it.each(['POST', 'PUT', 'PATCH', 'DELETE'])(
+      'rejects %s without x-devmentor-request with 403 before the route body runs',
+      async (method) => {
+        const logic = vi.fn(() => 'ran');
+        const response = await apiHandler(logic)(mutating(method), ctx);
+        expect(response.status).toBe(403);
+        expect(await response.json()).toEqual({
+          ok: false,
+          error: { code: 'forbidden', message: 'Missing x-devmentor-request header' },
+        });
+        expect(logic).not.toHaveBeenCalled();
+      },
+    );
+
+    it('runs a POST carrying the header', async () => {
+      const response = await apiHandler(() => 'ran')(
+        mutating('POST', { 'x-devmentor-request': '1' }),
+        ctx,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, data: 'ran' });
+    });
+
+    it.each(['GET', 'HEAD', 'OPTIONS'])('passes %s without the header', async (method) => {
+      const logic = vi.fn(() => new Response(null, { status: 204 }));
+      const response = await apiHandler(logic)(mutating(method), ctx);
+      expect(response.status).toBe(204);
+      expect(logic).toHaveBeenCalledTimes(1);
+    });
+
+    it('honours { csrf: false } for a POST without the header', async () => {
+      const response = await apiHandler(() => 'webhook', { csrf: false })(mutating('POST'), ctx);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, data: 'webhook' });
+    });
+
+    it('still enforces the header with an explicit { csrf: true }', async () => {
+      const response = await apiHandler(() => 'ran', { csrf: true })(mutating('POST'), ctx);
+      expect(response.status).toBe(403);
+    });
   });
 });

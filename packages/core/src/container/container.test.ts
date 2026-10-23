@@ -1,15 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { requireSession } from '../http/auth';
+import { UnauthorizedError } from '../http/errors';
 import { SessionService } from '../services/auth/session.service';
 import { TokenService } from '../services/auth/token.service';
 import { systemClock } from '../time/clock';
 import type { AppEnv, RawEnv } from '../config/env';
 
-const fork = vi.fn(() => ({ forked: true }));
+const findOne = vi.fn();
+const fork = vi.fn(() => ({ forked: true, findOne }));
 const orm = { em: { fork } };
 const logger = { info: vi.fn(), error: vi.fn() };
 
 // Stub the ORM leaf so the test never imports @mikro-orm/* or opens a connection.
-vi.mock('@devmentor/db', () => ({ getOrm: vi.fn(async () => orm), User: class {} }));
+vi.mock('@devmentor/db', () => ({
+  getOrm: vi.fn(async () => orm),
+  User: class {},
+  USER_ROLES: ['mentee', 'mentor', 'operator'],
+}));
 vi.mock('../logger', () => ({ createLogger: () => logger }));
 
 // Drive the env the container sees per test without resetting the module registry.
@@ -19,7 +26,9 @@ vi.mock('../config/env', async (importOriginal) => {
   return { ...actual, getEnv: (): AppEnv => actual.parseAppEnv(envState.overrides) };
 });
 
-const { getContainer, withScope } = await import('./container');
+const { getContainer, withRequestScope, withScope, withSessionCookieScope } = await import(
+  './container'
+);
 
 const globalForContainer = globalThis as { __devmentorContainer?: unknown };
 
@@ -27,6 +36,7 @@ beforeEach(() => {
   envState.overrides = {};
   delete globalForContainer.__devmentorContainer;
   fork.mockClear();
+  findOne.mockReset();
   logger.info.mockClear();
 });
 
@@ -115,7 +125,7 @@ describe('withScope', () => {
     const a = await withScope((cradle) => ({ em: cradle.em, users: cradle.userService }));
     const b = await withScope((cradle) => ({ em: cradle.em, users: cradle.userService }));
     expect(fork).toHaveBeenCalledTimes(2);
-    expect(a.em).toEqual({ forked: true });
+    expect(a.em).toMatchObject({ forked: true });
     expect(a.users).not.toBe(b.users);
   });
 
@@ -127,6 +137,96 @@ describe('withScope', () => {
 
     await expect(
       withScope(() => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('scoped session', () => {
+  const SECRET = 's'.repeat(32);
+  const user = {
+    id: 'u1',
+    email: 'ada@example.com',
+    roles: ['mentee'],
+    emailVerifiedAt: new Date(),
+    sessionVersion: 0,
+  };
+
+  async function signedCookie(): Promise<string> {
+    const { cradle } = await getContainer();
+    const { cookie } = await cradle.sessionService.issue({ id: 'u1', sessionVersion: 0 });
+    return cookie.split(';')[0]!.slice('devmentor_session='.length);
+  }
+
+  function requestWith(cookie?: string): Request {
+    return new Request('http://devmentor.test/api/x', {
+      headers: cookie === undefined ? {} : { cookie: `devmentor_session=${cookie}` },
+    });
+  }
+
+  it('resolves to null in a plain withScope', async () => {
+    await expect(withScope((cradle) => cradle.session)).resolves.toBeNull();
+  });
+
+  it('resolves to null in a request scope without a session cookie', async () => {
+    await expect(withRequestScope(requestWith(), (cradle) => cradle.session)).resolves.toBeNull();
+    await expect(withSessionCookieScope(undefined, (c) => c.session)).resolves.toBeNull();
+    await expect(withSessionCookieScope('', (c) => c.session)).resolves.toBeNull();
+    expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it('gives a public route null for an invalid cookie rather than throwing', async () => {
+    envState.overrides = { SESSION_SECRET: SECRET };
+    await expect(
+      withRequestScope(requestWith('not-a-jwt'), (cradle) => cradle.session),
+    ).resolves.toBeNull();
+  });
+
+  it('resolves the live session once per scope, shared with requireSession', async () => {
+    envState.overrides = { SESSION_SECRET: SECRET };
+    findOne.mockResolvedValue(user);
+    const req = requestWith(await signedCookie());
+
+    const result = await withRequestScope(req, async (cradle) => {
+      expect(findOne).not.toHaveBeenCalled(); // lazy until first resolution
+      const first = await cradle.session;
+      const second = await cradle.session;
+      const required = await requireSession(req, cradle);
+      return { first, second, required };
+    });
+
+    expect(result.first).toEqual({ userId: 'u1', roles: ['mentee'] });
+    expect(result.second).toBe(result.first);
+    expect(result.required).toBe(result.first);
+    expect(findOne).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves afresh in each new scope', async () => {
+    envState.overrides = { SESSION_SECRET: SECRET };
+    findOne.mockResolvedValue(user);
+    const cookie = await signedCookie();
+    await withSessionCookieScope(cookie, (cradle) => cradle.session);
+    await withSessionCookieScope(cookie, (cradle) => cradle.session);
+    expect(findOne).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets requireSession fail closed with 401 in a signed-out request scope', async () => {
+    const req = requestWith();
+    await expect(
+      withRequestScope(req, (cradle) => requireSession(req, cradle)),
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
+  it('disposes the request scope and rethrows when fn fails', async () => {
+    const container = await getContainer();
+    const scope = container.createScope();
+    const dispose = vi.spyOn(scope, 'dispose');
+    vi.spyOn(container, 'createScope').mockReturnValueOnce(scope);
+
+    await expect(
+      withRequestScope(requestWith(), () => {
         throw new Error('boom');
       }),
     ).rejects.toThrow('boom');

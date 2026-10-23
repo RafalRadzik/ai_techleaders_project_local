@@ -8,9 +8,10 @@ import {
 } from 'awilix';
 import { getOrm } from '@devmentor/db';
 import { getEnv, type AppEnv } from '../config/env';
+import { bindSessionScope, loadSession } from '../http/auth';
 import { createLogger } from '../logger';
 import { EventBus } from '../events/event-bus';
-import { SessionService } from '../services/auth/session.service';
+import { readSessionCookie, SessionService } from '../services/auth/session.service';
 import { TokenService } from '../services/auth/token.service';
 import { UserService } from '../services/auth/user.service';
 import { systemClock } from '../time/clock';
@@ -59,6 +60,9 @@ async function build(): Promise<AwilixContainer<Cradle>> {
     // A forked EntityManager per scope gives each request its own identity map / UoW.
     em: asFunction(({ orm }: Cradle) => orm.em.fork()).scoped(),
     userService: asClass(UserService).scoped(),
+    // No request, no session: plain `withScope` work always sees `null`.
+    // `withRequestScope` overrides this key in its own scope.
+    session: asFunction(() => Promise.resolve(null)).scoped(),
   });
 
   // Default in-process subscribers. Concept side effects (send a message, invalidate
@@ -90,4 +94,41 @@ export async function withScope<T>(fn: (cradle: Cradle) => Promise<T> | T): Prom
   } finally {
     await scope.dispose();
   }
+}
+
+/**
+ * `withScope` for work done on behalf of a session cookie value — the page helper's
+ * entry point, which has a cookie from `cookies()` but no `Request`. The scope's
+ * `session` key resolves lazily, at most once, to the live `Session` or `null`; it
+ * trusts nothing in the token beyond what `loadSession` re-checks against the database.
+ */
+export async function withSessionCookieScope<T>(
+  cookieValue: string | null | undefined,
+  fn: (cradle: Cradle) => Promise<T> | T,
+): Promise<T> {
+  const value = cookieValue || null;
+  const container = await getContainer();
+  const scope = container.createScope<Cradle>();
+  scope.register({
+    session: asFunction((cradle: Cradle) => loadSession(value, cradle)).scoped(),
+  });
+  bindSessionScope(scope.cradle, value);
+  try {
+    return await fn(scope.cradle);
+  } finally {
+    await scope.dispose();
+  }
+}
+
+/**
+ * Run `fn` in a request scope: everything `withScope` gives, plus a `session` key bound
+ * to this request's `devmentor_session` cookie. Resolving `session` never throws a 401 —
+ * a public route gets `null` and failing closed stays the caller's decision
+ * (`requireSession`).
+ */
+export function withRequestScope<T>(
+  req: Request,
+  fn: (cradle: Cradle) => Promise<T> | T,
+): Promise<T> {
+  return withSessionCookieScope(readSessionCookie(req.headers.get('cookie')), fn);
 }

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { withScope } from '../container/container';
+import { withRequestScope } from '../container/container';
 import type { Cradle } from '../container/cradle';
 import { apiHandler, type ApiRouteContext } from './apiHandler';
 import { BadRequestError, type FieldErrors, ValidationError } from './errors';
@@ -81,7 +81,7 @@ export function makeCrudRoute<Entity, CreateInput = never, UpdateInput = never>(
   }
 
   function run<T>(req: Request, fn: (cradle: Cradle) => Promise<T>): Promise<T> {
-    return withScope(async (cradle) => {
+    return withRequestScope(req, async (cradle) => {
       await options.authorize?.(req, cradle);
       return fn(cradle);
     });

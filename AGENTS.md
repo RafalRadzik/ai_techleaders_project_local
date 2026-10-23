@@ -169,8 +169,9 @@ the reference example every new concept copies. See
 - **Public pages use Tailwind utilities; `/admin/*` pages use shadcn-ui components**
   from `@devmentor/ui`. Add shadcn components with `npx shadcn@latest add <c>` run in
   `packages/ui` (its `components.json` is committed).
-- Request-scoped work goes through `withScope(fn)` from `@devmentor/core`, which opens
-  an awilix scope with a forked `EntityManager` and disposes it afterward.
+- Request-scoped work goes through `withRequestScope(req, fn)` from `@devmentor/core`
+  (`withScope(fn)` for work with no request), which opens an awilix scope with a forked
+  `EntityManager` and a lazy `session` key, and disposes it afterward.
 - **Never hand-roll fetch / validation / error-handling / CRUD.** Server routes use
   `makeCrudRoute`/`apiHandler` (no bare `try/catch` + `NextResponse.json`); services
   throw the typed `AppError`s and return DTOs, never build responses. Client pages

@@ -75,14 +75,17 @@ Read the diff in this order. A finding higher on the list outranks everything be
 - Errors are thrown as `AppError` subclasses from `packages/core/src/http/errors.ts`
   (`BadRequestError`, `UnauthorizedError`, `ForbiddenError`, `NotFoundError`,
   `ConflictError`, `ValidationError`). A service never builds a `Response`.
-- Guarded routes call `requireSession`, `requireRole`, or `assertOwnership` from
-  `packages/core/src/http/auth.ts` before touching a service. `readSession` currently
-  returns `null` by design (fail closed until the `auth` concept lands); the PR that
-  wires real session verification is `risk-high` and needs a second reviewer.
+- Guarded routes call `requireSession(req, cradle)`, `requireRole`, or
+  `assertOwnership` from `packages/core/src/http/auth.ts` before touching a service.
+  `requireSession` is the live check (signed cookie, user row, `session_version`,
+  stored roles with `operator` resolved against `OPERATOR_EMAILS`); nothing trusts
+  token claims alone. Routes never call `requireCsrfHeader` — `apiHandler` enforces
+  `x-devmentor-request` on every non-`GET`/`HEAD`/`OPTIONS` request, and
+  `{ csrf: false }` is acceptable only on the webhook route.
 - Collection routes are non-dynamic, so Next passes no `params`; helpers guard
   `ctx.params` before reading it (see `.ai/lessons.md`, 2026-09-02).
-- Request-scoped work goes through `withScope(fn)`; nothing resolves the root
-  container directly from a handler.
+- Request-scoped work goes through `withRequestScope(req, fn)` (or `withScope(fn)` for
+  work with no request); nothing resolves the root container directly from a handler.
 
 ### Client layer (`packages/ui/src/backend/`, `packages/app/src/app/**/page.tsx`)
 

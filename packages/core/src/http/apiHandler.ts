@@ -1,4 +1,5 @@
 import { createLogger, type Logger } from '../logger';
+import { requireCsrfHeader } from './auth';
 import { type FieldErrors, isAppError } from './errors';
 
 /**
@@ -21,6 +22,16 @@ export type ApiRouteHandler = (req: Request, ctx: ApiRouteContext) => Promise<Re
 
 /** Route logic: return the payload to wrap, or a `Response` to pass through as-is. */
 export type RouteLogic = (req: Request, ctx: ApiRouteContext) => Promise<unknown> | unknown;
+
+export interface ApiHandlerOptions {
+  /**
+   * Enforce `x-devmentor-request` on non-GET/HEAD/OPTIONS requests. Defaults to `true`.
+   * `false` is reserved for the webhook route, which authenticates by signature (B13).
+   */
+  csrf?: boolean;
+}
+
+const CSRF_EXEMPT_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 let cachedLogger: Logger | undefined;
 function logger(): Logger {
@@ -66,10 +77,18 @@ export function jsonError(
  * logger and returned as a generic 500 — a raw stack trace never reaches the client.
  *
  * Every route handler goes through this — no route writes its own `try/catch`.
+ *
+ * CSRF is enforced here, once: any method other than GET/HEAD/OPTIONS without the
+ * `x-devmentor-request` header is answered 403 before `logic` runs, unless the route
+ * opts out with `{ csrf: false }`.
  */
-export function apiHandler(logic: RouteLogic): ApiRouteHandler {
+export function apiHandler(logic: RouteLogic, options: ApiHandlerOptions = {}): ApiRouteHandler {
+  const csrf = options.csrf ?? true;
   return async (req, ctx) => {
     try {
+      if (csrf && !CSRF_EXEMPT_METHODS.has(req.method.toUpperCase())) {
+        requireCsrfHeader(req);
+      }
       const result = await logic(req, ctx);
       return result instanceof Response ? result : jsonOk(result);
     } catch (error) {

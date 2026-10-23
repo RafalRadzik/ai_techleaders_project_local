@@ -68,13 +68,22 @@ The `exports` maps in each `package.json` and the named exports behind them are 
 API between packages. `npm run typecheck` is the consumer check.
 
 - `@devmentor/core` (`.`, `./container`, `./services`, `./http`, `./events`,
-  `./validators/*`): `getEnv`, `createLogger`, `getContainer`, `withScope`, the
-  `Cradle` keys (`env`, `logger`, `orm`, `eventBus`, `em`, `userService`),
-  `UserService` and `UserDto`, the `AppError` family and `isAppError`, `apiHandler`,
+  `./validators/*`): `getEnv`, `createLogger`, `getContainer`, `withScope`,
+  `withRequestScope(req, fn)`, `withSessionCookieScope(cookieValue, fn)`, the
+  `Cradle` keys (`env`, `logger`, `orm`, `clock`, `eventBus`, `sessionService`,
+  `tokenService`, `em`, `userService`, and the scoped, lazy
+  `session: Promise<Session | null>`), `UserService` and `UserDto`, the `AppError`
+  family and `isAppError`, `apiHandler(logic, { csrf? })` with `ApiHandlerOptions`,
   `jsonOk`, `jsonError`, `makeCrudRoute` with `CrudService` and
-  `MakeCrudRouteOptions`, `readSession`, `requireSession`, `requireRole`,
-  `assertOwnership`, `Session`, `Role` (`'student' | 'mentor'`), `EventBus`,
-  `EventMap`, `userCreateSchema`, and the re-exported `checkDbConnection`.
+  `MakeCrudRouteOptions`, `requireSession(req, cradle)`, `requireRole`,
+  `requireCsrfHeader`, `CSRF_HEADER_NAME`, `assertOwnership`, `Session`
+  (`{ userId, roles: readonly [Role, ...Role[]] }`), `Role`
+  (`'mentee' | 'mentor' | 'operator'`), `EventBus`, `EventMap`, `userCreateSchema`,
+  and the re-exported `checkDbConnection`. `requireSession(req, cradle)` replaced the
+  stubbed `requireSession(req)`, `Session.roles` replaced `Session.role`, `student`
+  became `mentee`, and the unverified `readSession` was removed — the only way to
+  obtain a `Session` is the live check (cookie, user row, `session_version`, stored
+  roles with `operator` resolved against `OPERATOR_EMAILS`).
 - `@devmentor/db` (`.`, `./entities`, `./config`): `User`, `MentorProfile`, `IUser`,
   `IMentorProfile`, `baseProperties`, `entities`, `createOrmConfig`, `getOrm`,
   `closeOrm`, `checkDbConnection`, `getDbEnv`, `MikroORM`, `EntityManager`, and the
@@ -166,14 +175,20 @@ PR; adding a payload field is additive.
 
 ### 7. Session and CSRF conventions
 
-The session cookie name `devmentor_session` and the `Role` union live in
-`packages/core/src/http/auth.ts`; the CSRF header `x-devmentor-request` is set by
-`apiCall` in `packages/ui/src/backend/api/apiCall.ts`. Real session verification and
-the server-side header check are not implemented yet; every guarded route currently
-denies.
+The session cookie name `devmentor_session` lives in
+`packages/core/src/services/auth/session.service.ts`; the `Role` union
+(`'mentee' | 'mentor' | 'operator'`) and the CSRF header name live in
+`packages/core/src/http/auth.ts`. The CSRF header `x-devmentor-request` is set by
+`apiCall` in `packages/ui/src/backend/api/apiCall.ts` on every request and is
+**enforced by `apiHandler` on every `/api/*` request whose method is not `GET`, `HEAD`
+or `OPTIONS`** — including `makeCrudRoute`'s `POST`/`PUT`/`DELETE` — with a 403
+`forbidden` before the route body runs. Its presence is checked, not its value. The
+only opt-out, `apiHandler(logic, { csrf: false })`, is reserved for the webhook route.
+Every state-changing route is therefore JSON-only and called through `apiCall` or
+`CrudForm`, never a native HTML form.
 
-**Breaking:** once auth ships, renaming the cookie or the header, or changing the
-`Role` values.
+**Breaking:** renaming the cookie or the header, changing the `Role` values, or
+relaxing which methods require the header.
 
 **Required path:** change `core/src/http/auth.ts` and `ui/src/backend/api/apiCall.ts`
 together, with an integration scenario covering the denied path.

@@ -51,6 +51,15 @@ export {
   type UserDto,
 } from './services/auth/user.service';
 export {
+  EMAIL_VERIFY_MAIL_SUBJECT,
+  EMAIL_VERIFY_PATH,
+  EMAIL_VERIFY_PURPOSE,
+  EMAIL_VERIFY_TTL_SECONDS,
+  EmailVerificationService,
+  type EmailVerification,
+  type VerificationRecipient,
+} from './services/auth/email-verification.service';
+export {
   clearOauthStateCookie,
   createOauthState,
   OAUTH_STATE_COOKIE_NAME,

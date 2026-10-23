@@ -12,6 +12,7 @@ import { bindSessionScope, loadSession } from '../http/auth';
 import { RateLimiter } from '../http/rate-limit';
 import { createLogger } from '../logger';
 import { EventBus } from '../events/event-bus';
+import { EmailVerificationService } from '../services/auth/email-verification.service';
 import { GithubIdentityAdapter } from '../services/auth/adapters/github-identity';
 import { MockGithubIdentityAdapter } from '../services/auth/adapters/mock-github-identity';
 import type { GithubIdentityPort } from '../services/auth/github-identity.port';
@@ -118,6 +119,7 @@ async function build(): Promise<AwilixContainer<Cradle>> {
     // A forked EntityManager per scope gives each request its own identity map / UoW.
     em: asFunction(({ orm }: Cradle) => orm.em.fork()).scoped(),
     userService: asClass(UserService).scoped(),
+    emailVerificationService: asClass(EmailVerificationService).scoped(),
     // Scoped: its counters are written through the request's forked EntityManager.
     rateLimiter: asClass(RateLimiter).scoped(),
     // No request, no session: plain `withScope` work always sees `null`.

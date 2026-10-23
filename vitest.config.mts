@@ -55,6 +55,7 @@ export default defineConfig({
         'packages/core/src/logger.ts',
         'packages/core/src/services/auth/adapters/github-identity.ts',
         'packages/core/src/services/auth/adapters/mock-github-identity.ts',
+        'packages/core/src/services/auth/email-verification.service.ts',
         'packages/core/src/services/auth/github-identity.port.ts',
         'packages/core/src/services/auth/oauth-state.ts',
         'packages/core/src/services/auth/password.service.ts',

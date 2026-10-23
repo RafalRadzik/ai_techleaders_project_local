@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { requireSession } from '../http/auth';
-import { ForbiddenError, UnauthorizedError } from '../http/errors';
+import { BadRequestError, ForbiddenError, UnauthorizedError } from '../http/errors';
+import {
+  EMAIL_VERIFY_PURPOSE,
+  EmailVerificationService,
+} from '../services/auth/email-verification.service';
 import { GithubIdentityAdapter } from '../services/auth/adapters/github-identity';
 import { MockGithubIdentityAdapter } from '../services/auth/adapters/mock-github-identity';
 import { RateLimiter } from '../http/rate-limit';
@@ -300,6 +304,25 @@ describe('withScope', () => {
     expect(first).toBeInstanceOf(RateLimiter);
     expect(execute).toHaveBeenCalledTimes(2);
     expect(await withScope(({ rateLimiter }) => rateLimiter)).not.toBe(first);
+  });
+
+  it('registers a scoped email verification service on the scope EntityManager', async () => {
+    envState.overrides = { SESSION_SECRET: 's'.repeat(32) };
+    findOne.mockResolvedValue(null);
+    const first = await withScope(async ({ emailVerificationService, tokenService }) => {
+      expect(emailVerificationService).toBeInstanceOf(EmailVerificationService);
+      const token = await tokenService.signPurposeToken({
+        purpose: EMAIL_VERIFY_PURPOSE,
+        subject: 'u1.',
+        ttlSeconds: 60,
+      });
+      await expect(emailVerificationService.verify(token)).rejects.toBeInstanceOf(BadRequestError);
+      return emailVerificationService;
+    });
+    expect(findOne).toHaveBeenCalledWith(expect.anything(), { id: 'u1' });
+    expect(await withScope(({ emailVerificationService }) => emailVerificationService)).not.toBe(
+      first,
+    );
   });
 
   it('disposes the scope and rethrows when fn fails', async () => {

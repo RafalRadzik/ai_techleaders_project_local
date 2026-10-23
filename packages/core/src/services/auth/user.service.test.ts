@@ -219,6 +219,36 @@ describe('UserService.list / findByEmail / create', () => {
     await expect(service.list()).resolves.toEqual([]);
   });
 
+  it("returns the signed-in caller's own DTO", async () => {
+    em = fakeEm([
+      row({ id: 'other', email: 'other@example.com' }),
+      row({ id: 'u1', email: 'ada@example.com', displayName: 'Ada', roles: ['mentor'] }),
+    ]);
+    const { service } = makeService(em, [], { userId: 'u1', roles: ['mentor'] });
+
+    await expect(service.current()).resolves.toMatchObject({
+      id: 'u1',
+      displayName: 'Ada',
+      roles: ['mentor'],
+    });
+    expect(em.findOne).toHaveBeenCalledWith(
+      User,
+      { id: 'u1' },
+      { populate: ['mentorProfile'] },
+    );
+  });
+
+  it('refuses current() without a live session, reading nothing', async () => {
+    const { service } = makeService(em, [], null);
+    await expect(service.current()).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(em.findOne).not.toHaveBeenCalled();
+  });
+
+  it("refuses current() when the session's row is gone", async () => {
+    const { service } = makeService(em, [], { userId: 'gone', roles: ['mentee'] });
+    await expect(service.current()).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
   it('copies only email and displayName, so create cannot set roles', async () => {
     const { service } = makeService(em);
     const input = {

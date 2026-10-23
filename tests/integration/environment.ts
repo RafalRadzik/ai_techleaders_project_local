@@ -4,10 +4,19 @@ import { randomBytes } from 'node:crypto';
  * Test infrastructure is the sole exception to the application's config rule: it
  * inherits the parent environment only to pass an ephemeral database URL to child
  * processes. Production code continues to read environment through zod config.
+ *
+ * `appUrl` is the served origin. The mock identity adapter redirects the browser to
+ * `${APP_URL}/api/auth/github/callback`, so it must be the harness's own random-port
+ * origin — the default `http://localhost:3000` would send sign-in to another host, where
+ * the OAuth state cookie is not sent.
  */
-export function integrationChildEnvironment(databaseUrl: string): NodeJS.ProcessEnv {
+export function integrationChildEnvironment(
+  databaseUrl: string,
+  appUrl?: string,
+): NodeJS.ProcessEnv {
   return {
     ...process.env,
+    ...(appUrl ? { APP_URL: appUrl } : {}),
     NODE_ENV: 'production',
     NEXT_TELEMETRY_DISABLED: '1',
     DATABASE_URL: databaseUrl,

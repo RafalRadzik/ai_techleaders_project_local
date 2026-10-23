@@ -2,14 +2,17 @@ import {
   ForbiddenError,
   ServiceUnavailableError,
   SESSION_COOKIE_NAME,
+  UnauthorizedError,
   type Cradle,
   type Session,
+  type UserDto,
 } from '@devmentor/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
   cookie: undefined as string | undefined,
   session: null as unknown,
+  current: vi.fn<() => Promise<unknown>>(),
 }));
 
 vi.mock('next/headers', () => ({
@@ -38,13 +41,15 @@ vi.mock('@devmentor/core', async (importOriginal) => ({
             ? Promise.reject(state.session)
             : Promise.resolve(state.session);
         },
+        userService: { current: state.current },
       } as unknown as Cradle),
   ),
 }));
 
 const { redirect } = await import('next/navigation');
 const { withSessionCookieScope } = await import('@devmentor/core');
-const { getPageSession, homeFor, requirePageRole, requirePageSession } = await import('./session');
+const { getPageSession, homeFor, requirePageRole, requirePageSession, requirePageUser } =
+  await import('./session');
 
 const mentee: Session = { userId: 'u-mentee', roles: ['mentee'] };
 const mentor: Session = { userId: 'u-mentor', roles: ['mentor'] };
@@ -61,6 +66,7 @@ beforeEach(() => {
   vi.mocked(withSessionCookieScope).mockClear();
   state.cookie = undefined;
   state.session = null;
+  state.current.mockReset();
 });
 
 describe('cookie name', () => {
@@ -193,5 +199,49 @@ describe('homeFor', () => {
     expect(homeFor(['mentee', 'mentor'])).toBe('/mentor');
     expect(homeFor(['mentor', 'operator'])).toBe('/admin');
     expect(homeFor(['mentee', 'mentor', 'operator'])).toBe('/admin');
+  });
+});
+
+describe('requirePageUser', () => {
+  const ada: UserDto = {
+    id: 'u-mentor',
+    email: 'ada@example.test',
+    displayName: 'Ada',
+    roles: ['mentor'],
+    githubLogin: null,
+    avatarUrl: null,
+    createdAt: '2026-10-23T10:00:00.000Z',
+    mentorProfile: null,
+  };
+
+  it("returns the session and the caller's own user from the same cookie", async () => {
+    signedInAs(mentor, 'cookie-9');
+    state.current.mockResolvedValue(ada);
+    await expect(requirePageUser('mentor', '/mentor')).resolves.toEqual({
+      session: mentor,
+      user: ada,
+    });
+    expect(withSessionCookieScope).toHaveBeenLastCalledWith('cookie-9', expect.any(Function));
+  });
+
+  it('runs the role guard first and reads no user when it redirects', async () => {
+    signedInAs(mentee);
+    await expect(requirePageUser('mentor', '/mentor')).rejects.toThrow('REDIRECT /home');
+    expect(state.current).not.toHaveBeenCalled();
+  });
+
+  it('sends a session that lapsed between the two reads to sign-in with returnTo', async () => {
+    signedInAs(mentor);
+    state.current.mockRejectedValue(new UnauthorizedError());
+    await expect(requirePageUser('mentor', '/mentor')).rejects.toThrow(
+      'REDIRECT /sign-in?returnTo=%2Fmentor',
+    );
+  });
+
+  it('rethrows any other failure', async () => {
+    signedInAs(mentor);
+    state.current.mockRejectedValue(new Error('database down'));
+    await expect(requirePageUser('mentor', '/mentor')).rejects.toThrow('database down');
+    expect(redirect).not.toHaveBeenCalled();
   });
 });

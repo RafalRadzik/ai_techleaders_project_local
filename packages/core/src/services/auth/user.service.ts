@@ -203,6 +203,22 @@ export class UserService {
     return users.map(toUserDto);
   }
 
+  /**
+   * The signed-in caller's own user, for greeting them on a signed-in page. Throws
+   * `UnauthorizedError` without a live session, or when its row no longer exists.
+   */
+  async current(): Promise<UserDto> {
+    const session = await this.readSession();
+    if (!session) throw new UnauthorizedError();
+    const user = await this.em.findOne(
+      User,
+      { id: session.userId },
+      { populate: ['mentorProfile'] },
+    );
+    if (!user) throw new UnauthorizedError();
+    return toUserDto(user);
+  }
+
   async findByEmail(email: string): Promise<IUser | null> {
     return this.em.findOne(User, { email });
   }

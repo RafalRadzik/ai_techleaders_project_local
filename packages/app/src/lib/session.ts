@@ -7,9 +7,12 @@ import {
   ServiceUnavailableError,
   SIGN_IN_PATH,
   signInErrorLocation,
+  UnauthorizedError,
   withSessionCookieScope,
+  type Cradle,
   type Role,
   type Session,
+  type UserDto,
 } from '@devmentor/core';
 
 /**
@@ -21,15 +24,24 @@ import {
  */
 
 export { homeFor };
-export type { Role, Session };
+export type { Role, Session, UserDto };
 
 /** A live session, or why there is none. */
 type PageSessionState = Session | 'signed_out' | 'no_active_role';
 
-async function loadPageSession(): Promise<PageSessionState> {
+/** Run `fn` in a request scope bound to this request's session cookie. */
+async function withPageScope<T>(fn: (cradle: Cradle) => Promise<T>): Promise<T> {
   const cookieValue = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
+  return withSessionCookieScope(cookieValue, fn);
+}
+
+function signInLocation(currentPath: string): string {
+  return `${SIGN_IN_PATH}?returnTo=${encodeURIComponent(currentPath)}`;
+}
+
+async function loadPageSession(): Promise<PageSessionState> {
   try {
-    const session = await withSessionCookieScope(cookieValue, (cradle) => cradle.session);
+    const session = await withPageScope((cradle) => cradle.session);
     return session ?? 'signed_out';
   } catch (error) {
     // `SESSION_SECRET` unset (dev/test): a page degrades to signed out instead of a 500.
@@ -60,9 +72,7 @@ export async function getPageSession(): Promise<Session | null> {
 export async function requirePageSession(currentPath: string): Promise<Session> {
   const state = await loadPageSession();
   if (state === 'no_active_role') redirect(signInErrorLocation('no_active_role'));
-  if (state === 'signed_out') {
-    redirect(`${SIGN_IN_PATH}?returnTo=${encodeURIComponent(currentPath)}`);
-  }
+  if (state === 'signed_out') redirect(signInLocation(currentPath));
   return state;
 }
 
@@ -76,4 +86,26 @@ export async function requirePageRole(role: Role, currentPath: string): Promise<
   const session = await requirePageSession(currentPath);
   if (!session.roles.includes(role)) redirect(homeFor(session.roles));
   return session;
+}
+
+/** A guarded page's session plus the caller's own user, for greeting them by name. */
+export interface PageUser {
+  session: Session;
+  user: UserDto;
+}
+
+/**
+ * `requirePageRole`, then the caller's own user (`UserService.current`). A session that
+ * lapses between the two reads (signed out in another tab) is sent to sign-in like any
+ * other signed-out visitor; nothing of the user's renders.
+ */
+export async function requirePageUser(role: Role, currentPath: string): Promise<PageUser> {
+  const session = await requirePageRole(role, currentPath);
+  try {
+    const user = await withPageScope((cradle) => cradle.userService.current());
+    return { session, user };
+  } catch (error) {
+    if (error instanceof UnauthorizedError) redirect(signInLocation(currentPath));
+    throw error;
+  }
 }

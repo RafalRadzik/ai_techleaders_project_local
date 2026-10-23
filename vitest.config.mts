@@ -22,11 +22,23 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: [
+        // Route-group folders are escaped: `(…)` is glob syntax.
+        'packages/app/src/app/\\(auth\\)/sign-in/page.tsx',
+        'packages/app/src/app/\\(auth\\)/sign-in/sign-in-notices.ts',
+        'packages/app/src/app/\\(mentee\\)/home/page.tsx',
+        'packages/app/src/app/\\(mentee\\)/layout.tsx',
+        'packages/app/src/app/\\(mentor\\)/layout.tsx',
+        'packages/app/src/app/\\(mentor\\)/mentor/page.tsx',
+        'packages/app/src/app/admin/layout.tsx',
+        'packages/app/src/app/admin/page.tsx',
+        'packages/app/src/app/admin/users/page.tsx',
+        'packages/app/src/app/admin/users/UsersTable.tsx',
         'packages/app/src/app/api/auth/github/callback/route.ts',
         'packages/app/src/app/api/auth/github/route.ts',
         'packages/app/src/app/api/auth/logout/route.ts',
         'packages/app/src/app/api/users/route.ts',
         'packages/app/src/components/auth/SignOutButton.tsx',
+        'packages/app/src/components/shell/SignedInFrame.tsx',
         'packages/app/src/lib/session.ts',
         'packages/core/src/config/env.ts',
         'packages/core/src/container/container.ts',

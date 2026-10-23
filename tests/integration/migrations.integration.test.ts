@@ -10,6 +10,7 @@ const npmExecutable = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const BASELINE = 'Migration20260901142829';
 const AUTH_IDENTITY = 'Migration20261023101145_auth_identity';
 const AUTH_PASSWORD = 'Migration20261023134430_auth_password';
+const AUTH_RATE_LIMIT = 'Migration20261023135729_auth_rate_limit';
 const AUTH_COLUMNS = [
   'avatar_url',
   'email_verified_at',
@@ -28,7 +29,8 @@ const PRE_EXISTING_EMAIL = 'founder@devmentor.dev';
  * asserting schema and existing rows each way.
  *
  * TC-MIGRATION-001 covers `auth-identity` (migrated `--to` it, so later migrations stay
- * pending); TC-MIGRATION-002 then covers `auth-password` on top of it.
+ * pending); TC-MIGRATION-002 then covers `auth-password` on top of it, and
+ * TC-MIGRATION-003 `auth-rate-limit` on top of that.
  */
 describe('TC-MIGRATION-001 auth-identity migration up, down and up again', () => {
   let postgres: StartedPostgreSqlContainer | undefined;
@@ -83,6 +85,10 @@ describe('TC-MIGRATION-001 auth-identity migration up, down and up again', () =>
   const userConstraints = () =>
     query(
       `select conname from pg_constraint where conrelid = 'users'::regclass order by conname`,
+    );
+  const passwordColumnCount = () =>
+    query(
+      `select count(*) from information_schema.columns where table_name = 'users' and column_name = 'password_hash'`,
     );
   const executed = () => query(`select name from mikro_orm_migrations order by id`);
   const insertUser = (email: string, roles?: string) =>
@@ -233,8 +239,62 @@ describe('TC-MIGRATION-001 auth-identity migration up, down and up again', () =>
     }, 120_000);
 
     it('up again restores password_hash, null for the surviving row', async () => {
-      await npm('run', 'db:migrate');
+      await migrateTo(AUTH_PASSWORD);
       await expectPasswordSchema();
+    }, 120_000);
+  });
+
+  describe('TC-MIGRATION-003 auth-rate-limit migration up, down and up again', () => {
+    const rateLimitTable = () =>
+      query(
+        `select column_name || ' ' || data_type || ' ' || is_nullable || ' ' || coalesce(column_default, '-')
+         from information_schema.columns
+         where table_name = 'auth_rate_limits'
+         order by column_name`,
+      );
+    const rateLimitIndexes = () =>
+      query(
+        `select indexdef from pg_indexes where tablename = 'auth_rate_limits' order by indexname`,
+      );
+
+    async function expectRateLimitSchema(): Promise<void> {
+      expect(await executed()).toEqual([BASELINE, AUTH_IDENTITY, AUTH_PASSWORD, AUTH_RATE_LIMIT]);
+      expect(await rateLimitTable()).toEqual([
+        'count integer NO -',
+        'key text NO -',
+        'window_start timestamp with time zone NO -',
+      ]);
+      expect(await rateLimitIndexes()).toEqual([
+        'CREATE UNIQUE INDEX auth_rate_limits_pkey ON public.auth_rate_limits USING btree (key)',
+        'CREATE INDEX auth_rate_limits_window_start_index ON public.auth_rate_limits USING btree (window_start)',
+      ]);
+      // The key is the primary key: a second row for one key is refused.
+      await query(`insert into auth_rate_limits values ('sign-in:email:x', now(), 1)`);
+      expect((await sql(`insert into auth_rate_limits values ('sign-in:email:x', now(), 1)`)).ok).toBe(
+        false,
+      );
+      expect((await sql(`insert into auth_rate_limits values ('k', null, 1)`)).ok).toBe(false);
+      // Existing users are untouched.
+      expect(await query(`select display_name from users`)).toEqual(['Founder']);
+    }
+
+    it('up creates auth_rate_limits with its window_start index', async () => {
+      await npm('run', 'db:migrate');
+      await expectRateLimitSchema();
+    }, 120_000);
+
+    it('down drops only auth_rate_limits and keeps the earlier schema', async () => {
+      await npm('run', 'db:migrate:down');
+
+      expect(await executed()).toEqual([BASELINE, AUTH_IDENTITY, AUTH_PASSWORD]);
+      expect(await query(`select to_regclass('auth_rate_limits') is null`)).toEqual(['t']);
+      expect(await passwordColumnCount()).toEqual(['1']);
+      expect(await query(`select display_name from users`)).toEqual(['Founder']);
+    }, 120_000);
+
+    it('up again recreates an empty auth_rate_limits', async () => {
+      await npm('run', 'db:migrate');
+      await expectRateLimitSchema();
     }, 120_000);
   });
 });

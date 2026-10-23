@@ -3,6 +3,7 @@ import { requireSession } from '../http/auth';
 import { ForbiddenError, UnauthorizedError } from '../http/errors';
 import { GithubIdentityAdapter } from '../services/auth/adapters/github-identity';
 import { MockGithubIdentityAdapter } from '../services/auth/adapters/mock-github-identity';
+import { RateLimiter } from '../http/rate-limit';
 import { PasswordService } from '../services/auth/password.service';
 import { SessionService } from '../services/auth/session.service';
 import { TokenService } from '../services/auth/token.service';
@@ -198,6 +199,21 @@ describe('withScope', () => {
     expect(fork).toHaveBeenCalledTimes(2);
     expect(a.em).toMatchObject({ forked: true });
     expect(a.users).not.toBe(b.users);
+  });
+
+  it('registers a scoped rate limiter writing through the scope EntityManager', async () => {
+    const execute = vi.fn(async (sql: string) =>
+      sql.startsWith('delete') ? {} : [{ count: 1, window_start_ms: 0 }],
+    );
+    fork.mockReturnValueOnce({ forked: true, findOne, execute } as never);
+    const first = await withScope(async ({ rateLimiter }) => {
+      await rateLimiter.consume('sign-in:email:x', { limit: 1, windowMs: 1_000 });
+      expect(rateLimiter).toBe(rateLimiter);
+      return rateLimiter;
+    });
+    expect(first).toBeInstanceOf(RateLimiter);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(await withScope(({ rateLimiter }) => rateLimiter)).not.toBe(first);
   });
 
   it('disposes the scope and rethrows when fn fails', async () => {

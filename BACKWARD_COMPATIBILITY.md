@@ -25,7 +25,8 @@ a breaking change and follows the path in "How to make a breaking change" at the
 ### 1. HTTP API (`packages/app/src/app/api/`)
 
 **The envelope.** Every `/api/*` route built with `apiHandler` or `makeCrudRoute`
-answers `{ ok: true, data }` or `{ ok: false, error: { code, message, fieldErrors? } }`.
+answers `{ ok: true, data }` or
+`{ ok: false, error: { code, message, fieldErrors?, retryAfterSeconds? } }`.
 The shape is declared twice on purpose, in `packages/core/src/http/apiHandler.ts` and
 `packages/ui/src/backend/api/types.ts`, because `ui` must not import `core`.
 
@@ -34,8 +35,13 @@ The shape is declared twice on purpose, in `packages/core/src/http/apiHandler.ts
 409 `conflict`, 422 `validation_failed` (with `fieldErrors`, keyed by dotted path or
 `_root`), 500 `internal_error`, 503 `service_unavailable` (`ServiceUnavailableError`:
 an integration credential is unset, an upstream call made through `fetchJson` timed
-out or failed, or a capacity gate is saturated; retryable). An `AppError` may carry
-optional `headers`, which `apiHandler` copies onto the error response. The client
+out or failed, or a capacity gate is saturated; retryable), 429 `rate_limited`
+(`TooManyRequestsError`, added in E01 Slice 4, additive: a rate-limit policy of
+`packages/core/src/http/rate-limit.ts` was exceeded; the envelope carries
+`retryAfterSeconds` and the response a matching `Retry-After` header; the message is
+generic and never reveals whether an email exists). An `AppError` may carry optional
+`headers`, which `apiHandler` copies onto the error response, and an optional
+`retryAfterSeconds`, which it puts in the envelope. The client
 adds `network_error` and `invalid_response` in `apiCall.ts`.
 
 **Routes in place:**
@@ -84,7 +90,8 @@ API between packages. `npm run typecheck` is the consumer check.
   `./validators/*`): `getEnv`, `createLogger`, `getContainer`, `withScope`,
   `withRequestScope(req, fn)`, `withSessionCookieScope(cookieValue, fn)`, the
   `Cradle` keys (`env`, `logger`, `orm`, `clock`, `eventBus`, `sessionService`,
-  `tokenService`, `identity`, `em`, `userService`, and the scoped, lazy
+  `tokenService`, `passwordService`, `identity`, `em`, `userService`, the scoped
+  `rateLimiter` (added in E01 Slice 4), and the scoped, lazy
   `session: Promise<Session | null>`), `UserService` and `UserDto`, the `AppError`
   family and `isAppError`, `apiHandler(logic, { csrf? })` with `ApiHandlerOptions`,
   `jsonOk`, `jsonError`, `makeCrudRoute` with `CrudService` and
@@ -93,6 +100,12 @@ API between packages. `npm run typecheck` is the consumer check.
   (`{ userId, roles: readonly [Role, ...Role[]] }`), `Role`
   (`'mentee' | 'mentor' | 'operator'`), `EventBus`, `EventMap`, and the re-exported
   `checkDbConnection`. Added in E01 (additive): `ServiceUnavailableError`;
+  `TooManyRequestsError` and the rate limiter (`RateLimiter` with `consume`/`consumeAll`,
+  `RateLimitPolicy`, `RateLimitCheck`, the policy constants `SIGN_IN_PER_IP`,
+  `SIGN_IN_PER_EMAIL`, `REGISTRATION_PER_IP`, `VERIFICATION_RESEND_PER_EMAIL`,
+  `LONGEST_RATE_LIMIT_WINDOW_MS`, the key helpers `rateLimitKey`, `clientIp`,
+  `signInLimits`, `registrationLimits`, `verificationResendLimits`, and
+  `guardCredentialAttempt`, which fixes the gate → limit → hash ordering);
   `systemClock` and `Clock`; `SessionService` (`SESSION_COOKIE_NAME`,
   `readSessionCookie`, `SessionClaims`, `IssuedSession`) and `TokenService`
   (`PurposeTokenClaims`, `SignPurposeTokenInput`); the GitHub identity port
@@ -117,7 +130,7 @@ API between packages. `npm run typecheck` is the consumer check.
   cannot set `roles` or any other column. `UserService` also takes the scoped `session`
   as a constructor dependency, and `list()` requires an `operator` session.
 - `@devmentor/db` (`.`, `./entities`, `./config`): `User`, `MentorProfile`, `IUser`,
-  `IMentorProfile`, `baseProperties`, `entities`, `createOrmConfig`, `getOrm`,
+  `IMentorProfile`, `AuthRateLimit` and `IAuthRateLimit` (added in E01 Slice 4), `baseProperties`, `entities`, `createOrmConfig`, `getOrm`,
   `closeOrm`, `checkDbConnection`, `getDbEnv`, `MikroORM`, `EntityManager`, and the
   re-exported `EntityRepository`, `FilterQuery`, `Loaded`, `RequiredEntityData`.
 - `@devmentor/ui` (`.`, `./backend`, `./tokens.css`, `./lib/utils`, `./components/*`):
@@ -143,7 +156,12 @@ the change spans several concepts; note it in the PR body.
   `display_name`) and `mentor_profiles` (`id`, timestamps, `user_id` unique with a
   cascading foreign key to `users`, `headline`, `bio` nullable,
   `years_of_experience` default 0). Column names are snake_case mappings of the
-  camelCase entity properties.
+  camelCase entity properties. `auth_rate_limits` (added in E01 Slice 4,
+  `Migration20261023135729_auth_rate_limit`): `key` text primary key
+  (`<scope>:<kind>:<sha256hex>`, never a raw email or IP), `window_start` timestamptz
+  indexed, `count` int — the one table without the uuid id and timestamps, and written
+  only by `RateLimiter`'s raw SQL. Its rows are short-lived counters: dropping or
+  emptying it only resets the current windows.
 - Migrations live in `packages/db/migrations/Migration<timestamp>.ts` next to the
   committed snapshot `.snapshot-devmentor.json`, run transactionally, and are
   generated with `npm run db:migration:create -- --name <x>`. The integration harness

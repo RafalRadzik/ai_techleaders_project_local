@@ -11,7 +11,7 @@ import { type FieldErrors, isAppError } from './errors';
 export type ApiSuccess<T> = { ok: true; data: T };
 export type ApiFailure = {
   ok: false;
-  error: { code: string; message: string; fieldErrors?: FieldErrors };
+  error: { code: string; message: string; fieldErrors?: FieldErrors; retryAfterSeconds?: number };
 };
 export type ApiResponseBody<T> = ApiSuccess<T> | ApiFailure;
 
@@ -58,12 +58,18 @@ export function jsonError(
   message: string,
   fieldErrors?: FieldErrors,
   headers?: Record<string, string>,
+  retryAfterSeconds?: number,
 ): Response {
   return json(
     status,
     {
       ok: false,
-      error: { code, message, ...(fieldErrors ? { fieldErrors } : {}) },
+      error: {
+        code,
+        message,
+        ...(fieldErrors ? { fieldErrors } : {}),
+        ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+      },
     },
     headers,
   );
@@ -98,6 +104,7 @@ export function apiHandler(logic: RouteLogic, options: ApiHandlerOptions = {}): 
           error.message,
           error.fieldErrors,
           error.headers,
+          error.retryAfterSeconds,
         );
       }
       logger().error({ err: error, path: req.url }, 'unhandled route error');

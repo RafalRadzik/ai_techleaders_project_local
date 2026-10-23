@@ -7,6 +7,7 @@ import {
   isAppError,
   NotFoundError,
   ServiceUnavailableError,
+  TooManyRequestsError,
   UnauthorizedError,
   ValidationError,
 } from './errors';
@@ -76,6 +77,19 @@ describe('AppError family', () => {
     expect(error.message).toBe('GitHub is unavailable');
     expect(error.cause).toBe(cause);
     expect(error.headers).toEqual({ 'retry-after': '30' });
+  });
+
+  it('carries retryAfterSeconds and a matching Retry-After header on TooManyRequestsError', () => {
+    const error = new TooManyRequestsError(42);
+    expect(error).toMatchObject({
+      status: 429,
+      code: 'rate_limited',
+      name: 'TooManyRequestsError',
+      message: 'Too many attempts. Try again later.',
+      retryAfterSeconds: 42,
+      headers: { 'retry-after': '42' },
+    });
+    expect(new TooManyRequestsError(1, 'Slow down').message).toBe('Slow down');
   });
 
   it('accepts headers on the base class', () => {

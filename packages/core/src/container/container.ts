@@ -9,6 +9,7 @@ import {
 import { getOrm } from '@devmentor/db';
 import { getEnv, type AppEnv } from '../config/env';
 import { bindSessionScope, loadSession } from '../http/auth';
+import { RateLimiter } from '../http/rate-limit';
 import { createLogger } from '../logger';
 import { EventBus } from '../events/event-bus';
 import { GithubIdentityAdapter } from '../services/auth/adapters/github-identity';
@@ -80,6 +81,8 @@ async function build(): Promise<AwilixContainer<Cradle>> {
     // A forked EntityManager per scope gives each request its own identity map / UoW.
     em: asFunction(({ orm }: Cradle) => orm.em.fork()).scoped(),
     userService: asClass(UserService).scoped(),
+    // Scoped: its counters are written through the request's forked EntityManager.
+    rateLimiter: asClass(RateLimiter).scoped(),
     // No request, no session: plain `withScope` work always sees `null`.
     // `withRequestScope` overrides this key in its own scope.
     session: asFunction(() => Promise.resolve(null)).scoped(),

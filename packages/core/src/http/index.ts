@@ -7,11 +7,31 @@ export {
   ConflictError,
   ValidationError,
   ServiceUnavailableError,
+  TooManyRequestsError,
   isAppError,
   type AppErrorOptions,
   type FieldErrors,
 } from './errors';
 export { safeReturnTo } from './return-to';
+export {
+  clientIp,
+  guardCredentialAttempt,
+  LONGEST_RATE_LIMIT_WINDOW_MS,
+  RateLimiter,
+  rateLimitKey,
+  registrationLimits,
+  REGISTRATION_PER_IP,
+  SIGN_IN_PER_EMAIL,
+  SIGN_IN_PER_IP,
+  signInLimits,
+  VERIFICATION_RESEND_PER_EMAIL,
+  verificationResendLimits,
+  type RateLimitCheck,
+  type RateLimitKeyDeps,
+  type RateLimitKind,
+  type RateLimitPolicy,
+  type RateLimitScope,
+} from './rate-limit';
 export {
   readCookie,
   redirectResponse,

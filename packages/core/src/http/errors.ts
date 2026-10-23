@@ -10,6 +10,8 @@ export type AppErrorOptions = {
   cause?: unknown;
   /** Extra response headers `apiHandler` copies onto the error response. */
   headers?: Record<string, string>;
+  /** Seconds until a retry can succeed; `apiHandler` puts it in the error envelope. */
+  retryAfterSeconds?: number;
 };
 
 export class AppError extends Error {
@@ -17,6 +19,7 @@ export class AppError extends Error {
   readonly code: string;
   readonly fieldErrors?: FieldErrors;
   readonly headers?: Record<string, string>;
+  readonly retryAfterSeconds?: number;
 
   constructor(message: string, status: number, code: string, options?: AppErrorOptions) {
     super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
@@ -26,6 +29,7 @@ export class AppError extends Error {
     this.code = code;
     this.fieldErrors = options?.fieldErrors;
     this.headers = options?.headers;
+    this.retryAfterSeconds = options?.retryAfterSeconds;
   }
 }
 
@@ -75,6 +79,20 @@ export class ServiceUnavailableError extends AppError {
     options?: { cause?: unknown; headers?: Record<string, string> },
   ) {
     super(message, 503, 'service_unavailable', options);
+  }
+}
+
+/**
+ * A rate limit (primitive B8) was exceeded. The message is deliberately generic — it never
+ * says whether the email exists. `retryAfterSeconds` reaches the client twice: in the
+ * envelope and as the `Retry-After` header.
+ */
+export class TooManyRequestsError extends AppError {
+  constructor(retryAfterSeconds: number, message = 'Too many attempts. Try again later.') {
+    super(message, 429, 'rate_limited', {
+      retryAfterSeconds,
+      headers: { 'retry-after': String(retryAfterSeconds) },
+    });
   }
 }
 

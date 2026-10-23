@@ -1,6 +1,7 @@
 import type { EntityManager, MikroORM } from '@devmentor/db';
 import type { AppEnv } from '../config/env';
 import type { Session } from '../http/auth';
+import type { RateLimiter } from '../http/rate-limit';
 import type { Logger } from '../logger';
 import type { EventBus } from '../events/event-bus';
 import type { GithubIdentityPort } from '../services/auth/github-identity.port';
@@ -18,7 +19,7 @@ import type { Clock } from '../time/clock';
  * Lifetimes:
  * - `env`, `logger`, `orm`, `clock`, `eventBus`, `sessionService`,
  *   `tokenService`, `passwordService`, `identity` — SINGLETON (shared for the process).
- * - `em`, `userService` — SCOPED (created fresh per request scope).
+ * - `em`, `userService`, `rateLimiter` — SCOPED (created fresh per request scope).
  * - `session` — SCOPED and lazy: a memoised `Promise<Session | null>`. The live check
  *   (cookie, user row, `session_version`, roles) runs on first resolution only, so a
  *   route guard and a service in one scope share one user lookup. `null` outside
@@ -41,5 +42,7 @@ export interface Cradle {
   identity: GithubIdentityPort;
   em: EntityManager;
   userService: UserService;
+  /** PostgreSQL-backed fixed-window counters (B8), on the scope's `em`. */
+  rateLimiter: RateLimiter;
   session: Promise<Session | null>;
 }

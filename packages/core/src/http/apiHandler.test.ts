@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiHandler, jsonError, jsonOk, type ApiRouteContext } from './apiHandler';
-import { NotFoundError, ServiceUnavailableError, ValidationError } from './errors';
+import {
+  NotFoundError,
+  ServiceUnavailableError,
+  TooManyRequestsError,
+  ValidationError,
+} from './errors';
 
 const testState = vi.hoisted(() => ({
   error: vi.fn(),
@@ -112,6 +117,22 @@ describe('apiHandler', () => {
     expect(await response.json()).toEqual({
       ok: false,
       error: { code: 'service_unavailable', message: 'Service temporarily unavailable' },
+    });
+  });
+
+  it('maps TooManyRequestsError to 429 with retryAfterSeconds and Retry-After', async () => {
+    const response = await apiHandler(() => {
+      throw new TooManyRequestsError(90);
+    })(req(), ctx);
+    expect(response.status).toBe(429);
+    expect(response.headers.get('retry-after')).toBe('90');
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: {
+        code: 'rate_limited',
+        message: 'Too many attempts. Try again later.',
+        retryAfterSeconds: 90,
+      },
     });
   });
 

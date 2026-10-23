@@ -53,6 +53,7 @@ describe('TC-AUTH-RACE-001 concurrent GitHub first sign-in', () => {
       eventBus,
       clock: { now: () => new Date() },
       env: { OPERATOR_EMAILS: [] },
+      session: Promise.resolve(null),
     });
   }
 

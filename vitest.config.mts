@@ -22,6 +22,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: [
+        'packages/app/src/app/api/users/route.ts',
         'packages/core/src/config/env.ts',
         'packages/core/src/container/container.ts',
         'packages/core/src/http/apiHandler.ts',

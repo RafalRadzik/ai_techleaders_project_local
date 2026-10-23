@@ -6,7 +6,8 @@ import {
 } from '@devmentor/db';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EventBus } from '../../events/event-bus';
-import { NotFoundError } from '../../http/errors';
+import type { Session } from '../../http/auth';
+import { ForbiddenError, NotFoundError, UnauthorizedError } from '../../http/errors';
 import type { Logger } from '../../logger';
 import type { GithubIdentity } from './github-identity.port';
 import { AccountNotLinkedError, LastRoleError, UserService } from './user.service';
@@ -97,17 +98,29 @@ function fakeEm(initial: Row[] = []) {
 
 type FakeEm = ReturnType<typeof fakeEm>;
 
-function makeService(em: FakeEm, operatorEmails: string[] = []) {
+const OPERATOR: Session = { userId: 'op', roles: ['operator'] };
+
+function makeService(
+  em: FakeEm,
+  operatorEmails: string[] = [],
+  session: Session | null = OPERATOR,
+) {
   const logger = { info: vi.fn(), error: vi.fn() };
   const eventBus = { emit: vi.fn(async () => undefined) };
-  const service = new UserService({
+  const sessionRead = vi.fn(() => Promise.resolve(session));
+  const deps = {
     em: em as unknown as EntityManager,
     logger: logger as unknown as Logger,
     eventBus: eventBus as unknown as EventBus,
     clock: { now: () => NOW },
     env: { OPERATOR_EMAILS: operatorEmails },
-  });
-  return { service, logger, eventBus };
+    // A getter, like awilix's PROXY cradle: reading it is what resolves the session.
+    get session() {
+      return sessionRead();
+    },
+  };
+  const service = new UserService(deps);
+  return { service, logger, eventBus, sessionRead };
 }
 
 const identity = (overrides: Partial<GithubIdentity> = {}): GithubIdentity => ({
@@ -176,6 +189,59 @@ describe('UserService.list / findByEmail / create', () => {
     const { service } = makeService(em);
     await expect(service.findByEmail('ada@example.com')).resolves.toBe(ada);
     await expect(service.findByEmail('nobody@example.com')).resolves.toBeNull();
+  });
+
+  it('does not resolve the session until list needs it', async () => {
+    const { service, sessionRead } = makeService(em);
+    await service.findByEmail('ada@example.com');
+    expect(sessionRead).not.toHaveBeenCalled();
+    await service.list();
+    expect(sessionRead).toHaveBeenCalledOnce();
+  });
+
+  it('refuses to list for an anonymous caller', async () => {
+    const { service } = makeService(em, [], null);
+    await expect(service.list()).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(em.find).not.toHaveBeenCalled();
+  });
+
+  it.each<[string, Session['roles']]>([
+    ['mentee', ['mentee']],
+    ['mentor', ['mentee', 'mentor']],
+  ])('refuses to list for a %s caller', async (_name, roles) => {
+    const { service } = makeService(em, [], { userId: 'u1', roles });
+    await expect(service.list()).rejects.toBeInstanceOf(ForbiddenError);
+    expect(em.find).not.toHaveBeenCalled();
+  });
+
+  it('lists for a caller holding operator among other roles', async () => {
+    const { service } = makeService(em, [], { userId: 'u1', roles: ['mentor', 'operator'] });
+    await expect(service.list()).resolves.toEqual([]);
+  });
+
+  it('copies only email and displayName, so create cannot set roles', async () => {
+    const { service } = makeService(em);
+    const input = {
+      email: 'new@example.com',
+      displayName: 'New',
+      roles: ['operator'],
+      sessionVersion: 9,
+      githubId: '1',
+      emailVerifiedAt: NOW,
+    };
+
+    // @ts-expect-error -- `roles` is not part of `UserCreateInput`.
+    await service.create({ email: 'x@example.com', displayName: 'X', roles: ['operator'] });
+    await service.create(input);
+
+    expect(em.create).toHaveBeenNthCalledWith(2, User, {
+      email: 'new@example.com',
+      displayName: 'New',
+    });
+    for (const unset of ['roles', 'githubId', 'emailVerifiedAt']) {
+      expect(em.rows[1]).not.toHaveProperty(unset);
+    }
+    expect(em.rows[1]?.sessionVersion).toBe(0);
   });
 
   it('creates a user and emits auth.user.created', async () => {

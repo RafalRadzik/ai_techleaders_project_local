@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { requireSession } from '../http/auth';
-import { UnauthorizedError } from '../http/errors';
+import { ForbiddenError, UnauthorizedError } from '../http/errors';
 import { GithubIdentityAdapter } from '../services/auth/adapters/github-identity';
 import { MockGithubIdentityAdapter } from '../services/auth/adapters/mock-github-identity';
 import { SessionService } from '../services/auth/session.service';
@@ -264,6 +264,26 @@ describe('scoped session', () => {
     await withSessionCookieScope(cookie, (cradle) => cradle.session);
     await withSessionCookieScope(cookie, (cradle) => cradle.session);
     expect(findOne).toHaveBeenCalledTimes(2);
+  });
+
+  it('wires the scope session into UserService lazily: building it looks nothing up', async () => {
+    envState.overrides = { SESSION_SECRET: SECRET };
+    findOne.mockResolvedValue(user);
+    const req = requestWith(await signedCookie());
+
+    await withRequestScope(req, async (cradle) => {
+      expect(cradle.userService).toBeDefined();
+      expect(findOne).not.toHaveBeenCalled();
+      // A mentee's scope session reaches `list`, which refuses it.
+      await expect(cradle.userService.list()).rejects.toBeInstanceOf(ForbiddenError);
+    });
+    expect(findOne).toHaveBeenCalledTimes(1);
+  });
+
+  it('makes UserService.list refuse plain withScope work, which has no session', async () => {
+    await expect(withScope((cradle) => cradle.userService.list())).rejects.toBeInstanceOf(
+      UnauthorizedError,
+    );
   });
 
   it('lets requireSession fail closed with 401 in a signed-out request scope', async () => {

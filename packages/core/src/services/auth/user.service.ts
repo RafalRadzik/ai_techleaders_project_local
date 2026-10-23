@@ -7,10 +7,10 @@ import {
 } from '@devmentor/db';
 import type { AppEnv } from '../../config/env';
 import type { EventBus } from '../../events/event-bus';
-import { ConflictError, NotFoundError } from '../../http/errors';
+import { requireRole, type Session } from '../../http/auth';
+import { ConflictError, NotFoundError, UnauthorizedError } from '../../http/errors';
 import type { Logger } from '../../logger';
 import type { Clock } from '../../time/clock';
-import type { UserCreateInput } from '../../validators/auth/user-create.schema';
 import type { GithubIdentity } from './github-identity.port';
 import {
   isOperatorEligible,
@@ -36,6 +36,15 @@ export interface UserDto {
   avatarUrl: string | null;
   createdAt: string;
   mentorProfile: { id: string; headline: string } | null;
+}
+
+/**
+ * The only fields `create` writes. Spelled out rather than spread into `em.create`, so
+ * `roles`, `sessionVersion`, `githubId` and `emailVerifiedAt` can never be mass-assigned.
+ */
+export interface UserCreateInput {
+  email: string;
+  displayName: string;
 }
 
 /** What the GitHub callback needs to sign the user in: the DTO plus the cookie's version. */
@@ -129,10 +138,20 @@ interface GithubOutcome {
   rolesChanged: RolesChanged | null;
 }
 
+/** What awilix (PROXY mode) hands the constructor: the resolving scope's cradle. */
+interface UserServiceDeps {
+  em: EntityManager;
+  logger: Logger;
+  eventBus: EventBus;
+  clock: Clock;
+  env: Pick<AppEnv, 'OPERATOR_EMAILS'>;
+  session: Promise<Session | null>;
+}
+
 /**
  * Domain service for users. Constructor-injected by awilix (PROXY mode), so it
  * receives a request-scoped `em` (a forked EntityManager) plus the shared `logger`,
- * `eventBus`, `clock` and `env`. All persistence goes through the `em` — services never
+ * `eventBus`, `clock` and `env`, and the scope's lazy `session`. All persistence goes through the `em` — services never
  * touch `process.env` or the ORM singleton directly, and never build an HTTP response.
  *
  * Events are emitted only after the owning transaction commits, so a rolled-back write
@@ -144,29 +163,30 @@ export class UserService {
   private readonly eventBus: EventBus;
   private readonly clock: Clock;
   private readonly env: Pick<AppEnv, 'OPERATOR_EMAILS'>;
+  private readonly readSession: () => Promise<Session | null>;
 
-  constructor({
-    em,
-    logger,
-    eventBus,
-    clock,
-    env,
-  }: {
-    em: EntityManager;
-    logger: Logger;
-    eventBus: EventBus;
-    clock: Clock;
-    env: Pick<AppEnv, 'OPERATOR_EMAILS'>;
-  }) {
+  constructor(deps: UserServiceDeps) {
+    const { em, logger, eventBus, clock, env } = deps;
     this.em = em;
     this.logger = logger;
     this.eventBus = eventBus;
     this.clock = clock;
     this.env = env;
+    // Read on demand, not destructured: resolving `session` here would run the live
+    // session lookup for every caller, including ones that never need it. A closure
+    // rather than a stored cradle, so inspecting the service never walks the proxy.
+    this.readSession = () => deps.session;
   }
 
-  /** List users with their mentor profile eagerly populated. */
+  /**
+   * List users with their mentor profile eagerly populated. Operator only: this check is
+   * the authority; the route's `authorize` is defence in depth. Throws `UnauthorizedError`
+   * without a live session and `ForbiddenError` without the `operator` role.
+   */
   async list(): Promise<UserDto[]> {
+    const session = await this.readSession();
+    if (!session) throw new UnauthorizedError();
+    requireRole(session, 'operator');
     const users = await this.em.find(
       User,
       {},
@@ -179,9 +199,12 @@ export class UserService {
     return this.em.findOne(User, { email });
   }
 
-  /** Create and persist a user, then emit `auth.user.created`. */
+  /**
+   * Create and persist a user, then emit `auth.user.created`. Only `email` and
+   * `displayName` are copied; every other column keeps its database default.
+   */
   async create(data: UserCreateInput): Promise<UserDto> {
-    const user = this.em.create(User, data);
+    const user = this.em.create(User, { email: data.email, displayName: data.displayName });
     this.em.persist(user);
     await this.em.flush();
     this.logger.info({ userId: user.id }, 'created user');

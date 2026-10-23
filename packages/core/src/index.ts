@@ -37,10 +37,10 @@ export {
   type AssignableRole,
   type GithubSignIn,
   type RoleChange,
+  type UserCreateInput,
   type UserDto,
 } from './services/auth/user.service';
 export { EventBus, type EventHandler, type EventId, type EventMap } from './events/index';
-export { userCreateSchema, type UserCreateInput } from './validators/auth/user-create.schema';
 
 // Reusable HTTP layer (typed errors, route wrappers, auth guards).
 export * from './http/index';

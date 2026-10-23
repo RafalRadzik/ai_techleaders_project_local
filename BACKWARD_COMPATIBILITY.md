@@ -44,10 +44,13 @@ adds `network_error` and `invalid_response` in `apiCall.ts`.
   `{ status: "ok", app, environment, database: "up" | "down", databaseError? }`, HTTP
   200 even when the database is down. `tests/integration/global-setup.ts` polls it and
   waits for `status === "ok"` and `database === "up"`; `README.md` documents it.
-- `GET /api/users` returns `UserDto[]`; `POST /api/users` takes
-  `{ email, displayName }` (`userCreateSchema`) and returns `UserDto`, where
-  `UserDto = { id, email, displayName, createdAt (ISO string), mentorProfile: { id, headline } | null }`.
-  The route is intentionally public until the `auth` concept lands.
+- `GET /api/users` returns `UserDto[]`, where
+  `UserDto = { id, email, displayName, roles, githubLogin, avatarUrl, createdAt (ISO string), mentorProfile: { id, headline } | null }`.
+  It is **operator only**: `401` without a live session, `403` without the `operator`
+  role — enforced by the route's `authorize` and again inside `UserService.list`. It was
+  public until E01 (accounts and roles); `POST /api/users` (`{ email, displayName }`) was
+  removed at the same time — it had no in-repo caller, and accounts are now created only
+  by the sign-in flows.
 - `makeCrudRoute` behavior asserted by `packages/core/src/http/makeCrudRoute.test.ts`:
   the default id parameter `id`, and the messages "This operation is not supported",
   "Missing resource id", and "Request body must be valid JSON".
@@ -78,12 +81,17 @@ API between packages. `npm run typecheck` is the consumer check.
   `MakeCrudRouteOptions`, `requireSession(req, cradle)`, `requireRole`,
   `requireCsrfHeader`, `CSRF_HEADER_NAME`, `assertOwnership`, `Session`
   (`{ userId, roles: readonly [Role, ...Role[]] }`), `Role`
-  (`'mentee' | 'mentor' | 'operator'`), `EventBus`, `EventMap`, `userCreateSchema`,
-  and the re-exported `checkDbConnection`. `requireSession(req, cradle)` replaced the
+  (`'mentee' | 'mentor' | 'operator'`), `EventBus`, `EventMap`, and the re-exported
+  `checkDbConnection`. `requireSession(req, cradle)` replaced the
   stubbed `requireSession(req)`, `Session.roles` replaced `Session.role`, `student`
   became `mentee`, and the unverified `readSession` was removed — the only way to
   obtain a `Session` is the live check (cookie, user row, `session_version`, stored
-  roles with `operator` resolved against `OPERATOR_EMAILS`).
+  roles with `operator` resolved against `OPERATOR_EMAILS`). `userCreateSchema` (and
+  `validators/auth/user-create.schema`) was removed with `POST /api/users`; it had no
+  consumer. `UserService.create` takes the explicit `UserCreateInput`
+  (`{ email, displayName }`, still exported) and copies only those two fields, so it
+  cannot set `roles` or any other column. `UserService` also takes the scoped `session`
+  as a constructor dependency, and `list()` requires an `operator` session.
 - `@devmentor/db` (`.`, `./entities`, `./config`): `User`, `MentorProfile`, `IUser`,
   `IMentorProfile`, `baseProperties`, `entities`, `createOrmConfig`, `getOrm`,
   `closeOrm`, `checkDbConnection`, `getDbEnv`, `MikroORM`, `EntityManager`, and the

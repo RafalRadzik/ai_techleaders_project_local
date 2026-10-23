@@ -8,7 +8,7 @@ Each phase ends with a manual-test checkpoint; the next phase starts only after 
 
 ## Phase 1 — React test toolchain (Slice 1, spec steps 1–2)
 
-- [ ] 1.1 Reconcile test deps/config: add missing `@testing-library/user-event`, `@vitejs/plugin-react`; React plugin in `vitest.config.mts`; per-file `// @vitest-environment jsdom`, node stays default (step 1)
+- [x] 1.1 Reconcile test deps/config: add missing `@testing-library/user-event`, `@vitejs/plugin-react`; React plugin in `vitest.config.mts`; per-file `// @vitest-environment jsdom`, node stays default (step 1)
 - [ ] 1.2 Document the component-testing approach in `AGENTS.md` (server components invoked directly, client components under jsdom, two mocking seams for redirects) (step 2)
 
 **Checkpoint:** `npm run test:unit:coverage`, `npm run typecheck`, `npm run lint` green.

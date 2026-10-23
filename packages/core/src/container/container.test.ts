@@ -45,17 +45,17 @@ const {
   createMailerAdapter,
   DEV_LOG_MAILER_WARNING,
   getContainer,
+  resetContainer,
   withRequestScope,
   withScope,
   withSessionCookieScope,
 } = await import('./container');
 const { parseAppEnv } = await import('../config/env');
 
-const globalForContainer = globalThis as { __devmentorContainer?: unknown };
 
 beforeEach(() => {
   envState.overrides = {};
-  delete globalForContainer.__devmentorContainer;
+  resetContainer();
   fork.mockClear();
   findOne.mockReset();
   logger.info.mockClear();
@@ -70,10 +70,13 @@ const PRODUCTION: RawEnv = {
 };
 
 describe('getContainer', () => {
-  it('builds once and caches the container on globalThis', async () => {
+  it('builds once and caches the container in this module graph, not on globalThis', async () => {
     const first = getContainer();
     expect(getContainer()).toBe(first);
-    expect(globalForContainer.__devmentorContainer).toBe(first);
+    // Regression: a globalThis container leaked one Next layer's classes into another.
+    expect(Object.values(globalThis)).not.toContain(first);
+    resetContainer();
+    expect(getContainer()).not.toBe(first);
   });
 
   it('registers the system clock as the clock singleton', async () => {

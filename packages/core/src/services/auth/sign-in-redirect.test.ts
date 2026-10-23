@@ -6,6 +6,7 @@ import {
   SIGN_IN_ERRORS,
   signInErrorLocation,
   signInFailure,
+  verificationFailure,
 } from './sign-in-redirect';
 import { AccountNotLinkedError } from './user.service';
 
@@ -39,6 +40,7 @@ describe('sign-in redirect targets', () => {
       '/sign-in?error=email_unverified',
       '/sign-in?error=github_account_mismatch',
       '/sign-in?error=no_active_role',
+      '/sign-in?error=verification',
     ]);
   });
 });
@@ -73,5 +75,31 @@ describe('signInFailure', () => {
   it('carries the given cookies', () => {
     const response = signInFailure(new Error('x'), ['a=; Max-Age=0']);
     expect(response.headers.getSetCookie()).toEqual(['a=; Max-Age=0']);
+  });
+});
+
+describe('verificationFailure', () => {
+  function target(error: unknown) {
+    const response = verificationFailure(error);
+    expect(response.status).toBe(302);
+    expect(response.headers.get('content-type')).toBeNull();
+    expect(response.headers.getSetCookie()).toEqual([]);
+    return response.headers.get('location');
+  }
+
+  it('sends a rejected link to the verification notice, logged at info', () => {
+    expect(target(new BadRequestError('Invalid or expired token'))).toBe('/sign-in?error=verification');
+    expect(log.info).toHaveBeenCalledOnce();
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it('reports an unconfigured app as unavailable, at warn', () => {
+    expect(target(new ServiceUnavailableError())).toBe('/sign-in?error=unavailable');
+    expect(log.warn).toHaveBeenCalledOnce();
+  });
+
+  it('logs anything unexpected at error and still redirects', () => {
+    expect(target(new Error('db down'))).toBe('/sign-in?error=unavailable');
+    expect(log.error).toHaveBeenCalledOnce();
   });
 });

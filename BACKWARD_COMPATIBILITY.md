@@ -67,6 +67,31 @@ adds `network_error` and `invalid_response` in `apiCall.ts`.
   required. Always answers `{ ok: true, data: null }` with an expiring
   `devmentor_session` cookie; a live session also has its `session_version` bumped,
   which revokes every copy of the cookie.
+- `POST /api/auth/register` (added in E01 Slice 4, additive): enveloped, CSRF-checked,
+  public, rate-limited per IP. Body `registerSchema`
+  (`{ email, password, displayName, returnTo? }`, password 12 characters to 72 UTF-8
+  bytes). Answers `{ ok: true, data: { email } }` and sets **no** cookie; the address
+  gets a 24-hour verification link. `409 conflict` for an address with a verified
+  account (its message points to GitHub when that account signs in there), `422` with
+  `fieldErrors`, `429 rate_limited`, `503` when the mail is not sent.
+- `POST /api/auth/login` (added in E01 Slice 4, additive): enveloped, CSRF-checked,
+  public, rate-limited per IP and per email. Body `loginSchema`
+  (`{ email, password, returnTo? }`). Answers
+  `{ ok: true, data: UserDto & { landingPath } }` with the `devmentor_session` cookie.
+  `landingPath` is the one field beyond `UserDto`: the body's `returnTo` when
+  `safeReturnTo` accepts it, else `homeFor` of the session's effective roles; the
+  client navigates there. Failures set no cookie: `401 unauthorized` with the generic
+  message "Invalid credentials" for an unknown email and a wrong password alike,
+  `403 forbidden` for the right password on an unverified address or an account with
+  no active role, `422`, `429 rate_limited`, `503` when the hashing gate is saturated.
+- `GET /api/auth/verify-email?token=` (added in E01 Slice 4, additive):
+  browser-navigated, not enveloped; every outcome is a 302. A valid link sets the
+  `devmentor_session` cookie and redirects to the link's `returnTo` (re-checked by
+  `safeReturnTo`) or the role home; already verified is a success. A missing, invalid,
+  expired or superseded token redirects to `/sign-in?error=verification`, an account
+  with no active role to `/sign-in?error=no_active_role`, anything else to
+  `/sign-in?error=unavailable`. The link format (`APP_URL` + this path + `?token=`) is
+  part of the contract: links already in inboxes must keep working for their 24 hours.
 - `makeCrudRoute` behavior asserted by `packages/core/src/http/makeCrudRoute.test.ts`:
   the default id parameter `id`, and the messages "This operation is not supported",
   "Missing resource id", and "Request body must be valid JSON".
@@ -113,7 +138,10 @@ API between packages. `npm run typecheck` is the consumer check.
   `githubCallbackUrl`, `NoVerifiedEmailError`); the OAuth state helpers
   (`createOauthState`, `verifyOauthState`, `clearOauthStateCookie`,
   `OAUTH_STATE_COOKIE_NAME`, ...); the sign-in redirect helpers (`SIGN_IN_PATH`,
-  `SIGN_IN_ERRORS`, `signInErrorLocation`, `signInFailure`); `homeFor` (the single
+  `SIGN_IN_ERRORS`, `signInErrorLocation`, `signInFailure`, and from Slice 4 the
+  `verification` code and `verificationFailure`); the body helpers `parseJsonBody`,
+  `readJsonBody` and `validateWith` (Slice 4; `makeCrudRoute` uses the same two steps,
+  so a bad body answers identically); `homeFor` (the single
   landing decision: `operator → /admin`, `mentor → /mentor`, else `/home`) and
   `liveRoles`; the cookie helpers `readCookie`, `serializeCookie`, `redirectResponse`
   with `CookieAttributes`; `fetchJson` (the outbound-call wrapper with a timeout,
@@ -136,7 +164,10 @@ API between packages. `npm run typecheck` is the consumer check.
 - `@devmentor/ui` (`.`, `./backend`, `./tokens.css`, `./lib/utils`, `./components/*`):
   `cn`, `Button` and `buttonVariants`, the `Card*` family; from `./backend`:
   `apiCall`, `apiCallOrThrow`, `ApiError`, `ApiCallOptions`, `ApiResult`,
-  `FieldErrors`, `CrudForm` with `CrudField`, `CrudFieldType`, `CrudFormProps`,
+  `FieldErrors`, `CrudForm` with `CrudField`, `CrudFieldType`, `CrudFormProps`
+  (including the `password` field type; Slice 4 added the optional `pendingLabel`,
+  `hiddenValues` and `renderError` props, with `CrudFormError`; server `fieldErrors`
+  for a name the form does not render join the form-level alert),
   `DataTable` with `Column`, `DataTableProps`, `DataTablePagination`,
   `LoadingMessage`, `ErrorMessage`, `EmptyState`; from `./tokens.css`: the CSS
   variable names (`--background`, `--foreground`, `--primary`, `--destructive`,

@@ -1,8 +1,9 @@
-import { z } from 'zod';
+import type { z } from 'zod';
 import { withRequestScope } from '../container/container';
 import type { Cradle } from '../container/cradle';
 import { apiHandler, type ApiRouteContext } from './apiHandler';
-import { BadRequestError, type FieldErrors, ValidationError } from './errors';
+import { BadRequestError } from './errors';
+import { readJsonBody, validateWith } from './parse-body';
 
 /**
  * The service shape a CRUD route drives. Every method is optional except `list` — a
@@ -33,32 +34,11 @@ export interface MakeCrudRouteOptions<Entity, CreateInput, UpdateInput> {
   authorize?: (req: Request, cradle: Cradle) => void | Promise<void>;
 }
 
-function flattenZodError(error: z.ZodError): FieldErrors {
-  const fieldErrors: FieldErrors = {};
-  for (const issue of error.issues) {
-    const key = issue.path.length ? issue.path.join('.') : '_root';
-    (fieldErrors[key] ??= []).push(issue.message);
-  }
-  return fieldErrors;
-}
-
-async function readJsonBody(req: Request): Promise<unknown> {
-  try {
-    return await req.json();
-  } catch {
-    throw new BadRequestError('Request body must be valid JSON');
-  }
-}
-
 function parseWith<T>(schema: z.ZodType<T> | undefined, data: unknown): T {
   if (!schema) {
     throw new BadRequestError('This operation is not supported');
   }
-  const result = schema.safeParse(data);
-  if (!result.success) {
-    throw new ValidationError('Validation failed', flattenZodError(result.error));
-  }
-  return result.data;
+  return validateWith(schema, data);
 }
 
 /**

@@ -434,4 +434,71 @@ describe('CrudForm', () => {
     submitForm();
     await waitFor(() => expect(request).toHaveBeenCalledWith('/api/login', { method: 'POST', body: { password: 'sample-credential' } }));
   });
+
+  it('renders a password field masked, with its autocomplete, and maps a server field error onto it', async () => {
+    request.mockResolvedValue({ ok: false, error: {
+      code: 'validation_failed', message: 'Validation failed',
+      fieldErrors: { password: ['Use a password of at least 12 characters.'] },
+    } });
+    render(<CrudForm schema={z.object({ email: z.string(), password: z.string() })} endpoint="/api/auth/register"
+      fields={[{ name: 'email', label: 'Email', type: 'email' }, { name: 'password', label: 'Password', type: 'password', autoComplete: 'new-password' }]} />);
+    const password = input('Password');
+    expect(password.type).toBe('password');
+    expect(password.autocomplete).toBe('new-password');
+    fireEvent.change(password, { target: { value: 'short' } });
+    submitForm();
+
+    const message = await screen.findByText('Use a password of at least 12 characters.');
+    expect(message.className).toBe('dm-field-error');
+    expect(password.getAttribute('aria-invalid')).toBe('true');
+    expect(password.getAttribute('aria-describedby')).toBe(message.parentElement!.id);
+    expect(input('Email').getAttribute('aria-invalid')).toBe('false');
+    expect(document.activeElement).toBe(password);
+    expect(password.value).toBe('short');
+  });
+
+  it('moves server field errors for fields it does not render into the form alert', async () => {
+    request.mockResolvedValue({ ok: false, error: {
+      code: 'validation_failed', message: 'Validation failed',
+      fieldErrors: { name: ['Name taken'], returnTo: ['Bad destination'], _root: ['Check the form'] },
+    } });
+    render(<CrudForm schema={textSchema} fields={textFields} endpoint="/api/profile" />);
+    submitForm();
+    await waitFor(() => expect(screen.getByText('Name taken').className).toBe('dm-field-error'));
+    const alert = screen.getByText('Bad destination').closest('[data-form-error]')!;
+    expect(within(alert as HTMLElement).getAllByText(/./).map((node) => node.textContent)).toEqual([
+      'Bad destination', 'Check the form',
+    ]);
+  });
+
+  it('submits hidden values with the fields and lets a rendered field win', async () => {
+    render(<CrudForm schema={z.object({ name: z.string(), returnTo: z.string().optional() })} fields={textFields}
+      endpoint="/api/auth/login" hiddenValues={{ returnTo: '/home', name: 'hidden' }} initialValues={{ name: 'Ada' }} />);
+    submitForm();
+    await waitFor(() => expect(request).toHaveBeenCalledWith('/api/auth/login', {
+      method: 'POST', body: { name: 'Ada', returnTo: '/home' },
+    }));
+  });
+
+  it('shows a pending label and lets the host word a failure, falling back to the server message', async () => {
+    let complete!: (result: ApiResult<unknown>) => void;
+    request.mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }));
+    const renderError = vi.fn(({ code, retryAfterSeconds }: { code: string; retryAfterSeconds?: number }) =>
+      code === 'rate_limited' ? <span>Wait {retryAfterSeconds} seconds. <a href="/help">Help</a></span> : undefined);
+    render(<CrudForm schema={textSchema} fields={textFields} endpoint="/api/auth/login"
+      submitLabel="Sign in" pendingLabel="Signing in…" renderError={renderError} />);
+    fireEvent.submit(screen.getByRole('button', { name: 'Sign in' }).closest('form')!);
+    expect(screen.getByRole('button', { name: 'Signing in…' })).toBeTruthy();
+    await act(async () => complete({ ok: false, error: { code: 'rate_limited', message: 'Too many attempts.', retryAfterSeconds: 30 } }));
+
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toBe('Wait 30 seconds. Help');
+    expect(within(alert).getByRole('link', { name: 'Help' })).toBeTruthy();
+    expect(renderError).toHaveBeenCalledWith({ code: 'rate_limited', message: 'Too many attempts.', retryAfterSeconds: 30 });
+
+    request.mockResolvedValueOnce({ ok: false, error: { code: 'unauthorized', message: 'Invalid credentials' } });
+    fireEvent.submit(screen.getByRole('button', { name: 'Sign in' }).closest('form')!);
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Invalid credentials'));
+    expect(renderError).toHaveBeenLastCalledWith({ code: 'unauthorized', message: 'Invalid credentials' });
+  });
 });

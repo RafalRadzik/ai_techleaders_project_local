@@ -166,7 +166,10 @@ the reference example every new concept copies. See
   queries pass a different schema instance than was discovered and `populate` breaks.
 - **`MikroORM.init()` does not connect in v7** — `getOrm()` calls `orm.connect()`
   explicitly and does not cache a failed connection (so the app recovers if the DB
-  comes back). The ORM and awilix container are cached on `globalThis` to survive HMR.
+  comes back). The ORM is cached on `globalThis` to survive HMR; the awilix container
+  is **not** — it is cached per module graph, because a `globalThis` container hands one
+  Next layer (pages vs route handlers) the other layer's error classes and breaks
+  `instanceof AppError`.
 - **`em.persistAndFlush()` was removed** — use `em.persist(e); await em.flush()`.
 - Touch the DB only in **dynamic** routes (`export const dynamic = "force-dynamic"`)
   and degrade gracefully; the app must build and boot with no database reachable.

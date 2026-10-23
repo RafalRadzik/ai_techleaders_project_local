@@ -1,6 +1,6 @@
 export { apiCall, apiCallOrThrow, ApiError, type ApiCallOptions } from './api/apiCall';
 export type { ApiResult, FieldErrors } from './api/types';
-export { CrudForm, type CrudField, type CrudFieldType, type CrudFormProps } from './forms/CrudForm';
+export { CrudForm, type CrudField, type CrudFieldType, type CrudFormError, type CrudFormProps } from './forms/CrudForm';
 export {
   DataTable,
   type Column,

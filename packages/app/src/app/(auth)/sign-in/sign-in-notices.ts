@@ -1,11 +1,11 @@
 import type { SignInError } from '@devmentor/core';
 
 /**
- * Every outcome the sign-in routes send back to `/sign-in`: `?cancelled=1`, each
- * `SignInError`, and `verification` (an email link, from Slice 4). Typed against
+ * Every outcome the sign-in routes send back to `/sign-in`: `?cancelled=1` and each
+ * `SignInError`, including `verification` from the email link. Typed against
  * `SignInError`, so a new code in core fails `typecheck` until it has copy here.
  */
-export const SIGN_IN_NOTICES: Record<SignInError | 'cancelled' | 'verification', string> = {
+export const SIGN_IN_NOTICES: Record<SignInError | 'cancelled', string> = {
   cancelled: 'Sign-in was cancelled. No account was created.',
   state:
     'We could not verify this sign-in request, so you are not signed in. Sign in with GitHub again.',
@@ -20,7 +20,7 @@ export const SIGN_IN_NOTICES: Record<SignInError | 'cancelled' | 'verification',
   no_active_role:
     'Your account no longer has access to DevMentor. Contact the DevMentor team if you think this is a mistake.',
   verification:
-    'This verification link has expired or is not valid. Request a new verification email, then open the link inside it.',
+    'This verification link has expired or is no longer valid. Register again with the same email address to get a new link, then open the link in that email.',
 };
 
 export type SignInSearchParams = Record<string, string | string[] | undefined>;
@@ -40,9 +40,21 @@ export function signInNotice(params: SignInSearchParams): string | null {
   return SIGN_IN_NOTICES[error as keyof typeof SIGN_IN_NOTICES];
 }
 
+function withReturnTo(path: string, returnTo: string): string {
+  return returnTo ? `${path}?returnTo=${encodeURIComponent(returnTo)}` : path;
+}
+
+/** `/register`, carrying a safe `returnTo` through to the verification link. */
+export function registerHref(returnTo: string): string {
+  return withReturnTo('/register', returnTo);
+}
+
+/** `/sign-in`, carrying a safe `returnTo` through. */
+export function signInHref(returnTo: string): string {
+  return withReturnTo('/sign-in', returnTo);
+}
+
 /** The GitHub start route, carrying a safe `returnTo` through (the route re-sanitises it). */
 export function githubSignInHref(returnTo: string): string {
-  return returnTo
-    ? `/api/auth/github?returnTo=${encodeURIComponent(returnTo)}`
-    : '/api/auth/github';
+  return withReturnTo('/api/auth/github', returnTo);
 }

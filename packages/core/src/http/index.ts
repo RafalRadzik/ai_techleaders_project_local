@@ -13,6 +13,7 @@ export {
   type FieldErrors,
 } from './errors';
 export { safeReturnTo } from './return-to';
+export { parseJsonBody, readJsonBody, validateWith } from './parse-body';
 export {
   clientIp,
   guardCredentialAttempt,

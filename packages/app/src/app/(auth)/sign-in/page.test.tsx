@@ -1,7 +1,9 @@
+import Link from 'next/link';
 import { Button } from '@devmentor/ui';
 import { AuthLayout, ErrorMessage } from '@devmentor/ui/backend';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { allElements, findByType, textOf } from '../../../test/element-tree';
+import { EmailSignInForm } from './EmailSignInForm';
 import { SIGN_IN_NOTICES, type SignInSearchParams } from './sign-in-notices';
 
 vi.mock('next/navigation', () => ({
@@ -44,7 +46,7 @@ describe('/sign-in', () => {
     expect(homeFor).toHaveBeenCalledWith(['mentor', 'operator']);
   });
 
-  it('offers GitHub first as a plain link, then the email form disabled with a note', async () => {
+  it('offers GitHub first as a plain link, then the email form, then a way to register', async () => {
     const tree = await renderPage();
     const [layout] = findByType(tree, AuthLayout);
     expect(layout!.props.title).toBe('Sign in');
@@ -55,18 +57,23 @@ describe('/sign-in', () => {
     expect(anchor.props.children).toBe('Sign in with GitHub');
 
     const elements = allElements(tree);
-    const [fieldset] = findByType(tree, 'fieldset');
-    expect(elements.indexOf(anchor)).toBeLessThan(elements.indexOf(fieldset!));
-    expect(fieldset!.props.disabled).toBe(true);
-    const [legend] = findByType(fieldset, 'legend');
-    expect(textOf(legend)).toBe('Sign in with email');
-    const note = findByType(fieldset, 'p').find((p) => p.props.id === 'email-sign-in-note');
-    expect(fieldset!.props['aria-describedby']).toBe('email-sign-in-note');
-    expect(textOf(note)).toBe('Email sign-in is not available yet. Use GitHub to sign in.');
+    const [form] = findByType(tree, EmailSignInForm);
+    expect(form!.props).toEqual({ returnTo: '' });
+    expect(elements.indexOf(anchor)).toBeLessThan(elements.indexOf(form!));
+
+    const [register] = findByType(tree, Link).filter((link) => link.props.href !== '/');
+    expect(register!.props.href).toBe('/register');
+    expect(textOf(register)).toBe('Create an account');
+    expect(elements.indexOf(form!)).toBeLessThan(elements.indexOf(register!));
 
     expect(notices(tree)).toEqual([]);
     const footerLink = layout!.props.footer as React.ReactElement<{ href: string }>;
     expect(footerLink.props.href).toBe('/');
+  });
+
+  it('points an expired or invalid verification link to registering again', async () => {
+    const [notice] = notices(await renderPage({ error: 'verification' }));
+    expect(notice).toContain('Register again with the same email address');
   });
 
   it('shows the cancelled notice (edge case 2)', async () => {
@@ -107,9 +114,13 @@ describe('/sign-in', () => {
     expect(notices(await renderPage({ cancelled: 'yes' }))).toEqual([]);
   });
 
-  it('carries a safe returnTo through to the GitHub start route', async () => {
-    const anchor = githubLink(await renderPage({ returnTo: '/mentor?tab=2' }));
-    expect(anchor.props.href).toBe('/api/auth/github?returnTo=%2Fmentor%3Ftab%3D2');
+  it('carries a safe returnTo through to GitHub, the email form and registration', async () => {
+    const tree = await renderPage({ returnTo: '/mentor?tab=2' });
+    expect(githubLink(tree).props.href).toBe('/api/auth/github?returnTo=%2Fmentor%3Ftab%3D2');
+    expect(findByType(tree, EmailSignInForm)[0]!.props.returnTo).toBe('/mentor?tab=2');
+    expect(findByType(tree, Link).map((link) => link.props.href)).toContain(
+      '/register?returnTo=%2Fmentor%3Ftab%3D2',
+    );
   });
 
   it.each([['//evil.example'], ['https://evil.example'], ['/api/users']])(

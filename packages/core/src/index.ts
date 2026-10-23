@@ -83,6 +83,7 @@ export {
   SIGN_IN_PATH,
   signInErrorLocation,
   signInFailure,
+  verificationFailure,
   type SignInError,
 } from './services/auth/sign-in-redirect';
 export type { Mailer, MailMessage } from './services/notifications/mailer.port';

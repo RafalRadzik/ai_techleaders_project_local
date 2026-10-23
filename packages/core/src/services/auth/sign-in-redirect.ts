@@ -19,6 +19,8 @@ export const SIGN_IN_CANCELLED_LOCATION = `${SIGN_IN_PATH}?cancelled=1`;
  * - `email_unverified` — the matching account's own email is not verified (edge case 4).
  * - `github_account_mismatch` — the matching account is linked to another GitHub account.
  * - `no_active_role` — an operator-only account no longer on the allowlist.
+ * - `verification` — an email verification link that is invalid, expired or superseded
+ *   by a later registration (Slice 4).
  */
 export const SIGN_IN_ERRORS = [
   'unavailable',
@@ -27,6 +29,7 @@ export const SIGN_IN_ERRORS = [
   'email_unverified',
   'github_account_mismatch',
   'no_active_role',
+  'verification',
 ] as const;
 
 export type SignInError = (typeof SIGN_IN_ERRORS)[number];
@@ -62,4 +65,23 @@ export function signInFailure(error: unknown, cookies: readonly string[] = []): 
     logger().error({ err: error }, 'github sign-in failed unexpectedly');
   }
   return redirectResponse(signInErrorLocation(code), cookies);
+}
+
+/**
+ * Turn a failure of the browser-navigated email-verification route into a redirect to
+ * `/sign-in` — never a JSON envelope. A rejected link (`BadRequestError`: invalid, expired,
+ * wrong purpose or superseded) is `verification`, logged at `info`; anything else is
+ * `unavailable`, at `warn` when the app is unconfigured and at `error` when unexpected.
+ */
+export function verificationFailure(error: unknown): Response {
+  if (error instanceof BadRequestError) {
+    logger().info({ err: error, signInError: 'verification' }, 'email verification refused');
+    return redirectResponse(signInErrorLocation('verification'));
+  }
+  if (error instanceof ServiceUnavailableError) {
+    logger().warn({ err: error }, 'email verification unavailable');
+  } else {
+    logger().error({ err: error }, 'email verification failed unexpectedly');
+  }
+  return redirectResponse(signInErrorLocation('unavailable'));
 }

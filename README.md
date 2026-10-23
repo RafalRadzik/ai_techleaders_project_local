@@ -153,9 +153,33 @@ log — plus a throwaway `SESSION_SECRET` and
 Restart `npm run dev`, open `/sign-in` and choose GitHub. After sign-in you land on
 your role's home: `/admin` for operators, `/mentor` for mentors, `/home` for mentees.
 
-There is no local sign-in without GitHub. The mock identity adapter works only
-inside the integration harness (it needs `INTEGRATION_TEST_RUN=1`), so a development
-server without the GitHub variables shows sign-in as unavailable.
+The mock identity adapter works only inside the integration harness (it needs
+`INTEGRATION_TEST_RUN=1`), so a development server without the GitHub variables shows
+GitHub sign-in as unavailable. Email sign-in needs only `SESSION_SECRET`.
+
+### Email registration and sign-in
+
+`/register` creates an account with a display name, an email address and a password
+(at least 12 characters, at most 72 bytes). Registering signs nobody in: DevMentor
+emails a link to `/api/auth/verify-email`, which works for 24 hours, confirms the
+address and signs the user in on their role's home (or the page they came from).
+Registering again with an unconfirmed address sends a fresh link and the old one stops
+working; this is also how to get a new link after one expires. An address whose
+account signs in with GitHub is refused with a pointer to GitHub sign-in.
+
+`/sign-in` offers GitHub first and the email form below it. A wrong password and an
+unknown address get the same "Invalid credentials" message. An unconfirmed address is
+refused until its link is opened. Too many attempts answer `429` with a wait time:
+sign-in allows 10 attempts per IP and 5 per email in 15 minutes, registration 5 per IP
+per hour. Per-IP limits apply only when `TRUSTED_PROXY_HOPS` lets the app read the
+client's address. All three routes are JSON or redirect only; the forms post through
+`apiCall`, which sends the CSRF header.
+
+In development no mail provider is needed. With `MAILER_ADAPTER` and `MAIL_API_KEY`
+unset, the log mailer writes every message to the `npm run dev` terminal as one JSON
+line (`"msg":"mail.sent"`), including the verification link. Copy the link from the
+`text` field into the browser to finish registering. Production sends through Resend
+and needs `MAIL_API_KEY` and `MAIL_FROM`.
 
 ## Scripts
 

@@ -1,12 +1,14 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { safeReturnTo } from '@devmentor/core';
-import { Button, Input, Label } from '@devmentor/ui';
+import { Button } from '@devmentor/ui';
 import { AuthLayout, ErrorMessage } from '@devmentor/ui/backend';
 import { getPageSession, homeFor } from '../../../lib/session';
+import { EmailSignInForm } from './EmailSignInForm';
 import {
   firstParam,
   githubSignInHref,
+  registerHref,
   signInNotice,
   type SignInSearchParams,
 } from './sign-in-notices';
@@ -16,8 +18,9 @@ export const dynamic = 'force-dynamic';
 
 /**
  * `/sign-in` (public auth surface). GitHub is the first action and a plain link to the
- * navigated start route; the email form is shown disabled until email sign-in ships
- * (Slice 4). A visitor who already holds a live session never sees the form.
+ * navigated start route; the email form below it posts JSON to `/api/auth/login`. A safe
+ * `returnTo` rides along with both. A visitor who already holds a live session never sees
+ * the form.
  */
 export default async function SignInPage({
   searchParams,
@@ -34,7 +37,7 @@ export default async function SignInPage({
   return (
     <AuthLayout
       title="Sign in"
-      description="Use your GitHub account to sign in. Your first sign-in creates your DevMentor account."
+      description="Sign in with GitHub, or with the email address and password you registered. Your first GitHub sign-in creates your account."
       footer={<Link href="/">Back to the home page</Link>}
     >
       <div className="dm-account-form">
@@ -45,30 +48,13 @@ export default async function SignInPage({
         <div className="dm-account-divider" aria-hidden="true">
           or use your email
         </div>
-        <fieldset className="dm-account-email" disabled aria-describedby="email-sign-in-note">
-          <legend className="dm-account-legend">Sign in with email</legend>
-          <p id="email-sign-in-note" className="dm-account-email-unavailable">
-            Email sign-in is not available yet. Use GitHub to sign in.
-          </p>
-          <div className="dm-form">
-            <div className="dm-field">
-              <Label htmlFor="sign-in-email">Email address</Label>
-              <Input id="sign-in-email" name="email" type="email" autoComplete="email" />
-            </div>
-            <div className="dm-field">
-              <Label htmlFor="sign-in-password">Password</Label>
-              <Input
-                id="sign-in-password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-              />
-            </div>
-            <div className="dm-form-actions">
-              <Button type="button">Sign in</Button>
-            </div>
-          </div>
-        </fieldset>
+        <EmailSignInForm returnTo={returnTo} />
+        <p className="dm-account-switch">
+          <span>New to DevMentor?</span>
+          <Button asChild variant="link">
+            <Link href={registerHref(returnTo)}>Create an account</Link>
+          </Button>
+        </p>
       </div>
     </AuthLayout>
   );

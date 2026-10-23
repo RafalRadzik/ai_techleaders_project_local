@@ -28,13 +28,16 @@ import { systemClock } from '../time/clock';
 import type { Cradle } from './cradle';
 
 /**
- * The root container is cached on `globalThis` so Next.js HMR reuses a single
- * container (and the single ORM/pool it holds) across dev reloads. Registrations are
+ * The root container, cached **per module graph** and deliberately not on `globalThis`.
+ * Next evaluates `core` once per server layer (pages, route handlers). A container shared
+ * through `globalThis` hands one layer services built from the *other* layer's classes,
+ * so that layer's `instanceof AppError` fails and a typed 401 from `UserService` became a
+ * logged 500. Only the ORM and its pool are process-wide (`getOrm`, on `globalThis`), and
+ * entities are `globalThis` singletons, so every container shares one pool. Each layer
+ * therefore has its own hashing gate; only route handlers hash. Registrations are
  * explicit — no `loadModules` globbing — so every binding is greppable.
  */
-const globalForContainer = globalThis as unknown as {
-  __devmentorContainer?: Promise<AwilixContainer<Cradle>>;
-};
+let rootContainer: Promise<AwilixContainer<Cradle>> | undefined;
 
 /**
  * Secrets production cannot run without. Checked here rather than in the zod schema
@@ -143,10 +146,13 @@ async function build(): Promise<AwilixContainer<Cradle>> {
 }
 
 export function getContainer(): Promise<AwilixContainer<Cradle>> {
-  if (!globalForContainer.__devmentorContainer) {
-    globalForContainer.__devmentorContainer = build();
-  }
-  return globalForContainer.__devmentorContainer;
+  rootContainer ??= build();
+  return rootContainer;
+}
+
+/** Forget the cached container, so the next `getContainer()` builds a new one (tests). */
+export function resetContainer(): void {
+  rootContainer = undefined;
 }
 
 /**

@@ -170,9 +170,14 @@ the reference example every new concept copies. See
 - **`em.persistAndFlush()` was removed** — use `em.persist(e); await em.flush()`.
 - Touch the DB only in **dynamic** routes (`export const dynamic = "force-dynamic"`)
   and degrade gracefully; the app must build and boot with no database reachable.
-- **Public pages use Tailwind utilities; `/admin/*` pages use shadcn-ui components**
-  from `@devmentor/ui`. Add shadcn components with `npx shadcn@latest add <c>` run in
-  `packages/ui` (its `components.json` is committed).
+- **Three UI surfaces.** `public` (landing, `/mentors`, `/m/<slug>`, `(auth)/*`) uses
+  Tailwind utilities with no shared chrome. `app` (`(mentee)/*`, `(mentor)/*`, signed
+  in) and `admin` (`/admin/*`, operator) use shadcn-ui components from `@devmentor/ui`
+  inside `AppShell` (`ui/src/backend/shell/AppShell.tsx`). `AppShell` owns layout,
+  chrome and the user block; the host layout passes its own rendered `<Link>` list as
+  the `nav` slot, because `ui` cannot import `next` or see a `Role`. Add shadcn
+  components with `npx shadcn@latest add <c>` run in `packages/ui` (its
+  `components.json` is committed).
 - Request-scoped work goes through `withRequestScope(req, fn)` from `@devmentor/core`
   (`withScope(fn)` for work with no request), which opens an awilix scope with a forked
   `EntityManager` and a lazy `session` key, and disposes it afterward.

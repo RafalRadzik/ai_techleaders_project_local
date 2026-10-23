@@ -39,7 +39,7 @@ Each phase ends with a manual-test checkpoint; the next phase starts only after 
 
 ## Phase 4 — Signed-in shell and R07 (Slice 3, steps 18–20)
 
-- [ ] 4.1 `AppShell` (F2) reconcile with spec + three-surface taxonomy in `AGENTS.md` (step 18)
+- [x] 4.1 `AppShell` (F2) reconcile with spec + three-surface taxonomy in `AGENTS.md` (step 18)
 - [ ] 4.2 `app/src/lib/nav.ts` + port the three signed-in layouts to `AppShell` without touching guard calls (step 19)
 - [ ] 4.3 `expectAbsent` helper + `roles.integration.test.ts` (step 20)
 

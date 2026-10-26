@@ -9,18 +9,27 @@ import nextTs from "eslint-config-next/typescript";
  *    └────> ui
  *
  * Each package forbids importing the workspaces it must not depend on, so a
- * cycle-introducing import fails lint (acceptance criterion #9).
+ * cycle-introducing import fails lint (acceptance criterion #9). It also forbids the
+ * framework packages it must stay free of: `core` and `db` never import `next` or
+ * `react`, and `ui` never imports `next` (it has no `next` dependency). Both lists live
+ * in one `no-restricted-imports` entry per package, because a later flat-config entry
+ * for the same rule replaces an earlier one rather than merging with it.
  */
-const boundary = (files, forbidden) => ({
+const restrict = (name, reason) => ({
+  group: [name, `${name}/*`],
+  message: `${reason}: this package must not import ${name}.`,
+});
+
+const boundary = (files, workspaces, frameworks = []) => ({
   files,
   rules: {
     "no-restricted-imports": [
       "error",
       {
-        patterns: forbidden.map((name) => ({
-          group: [name, `${name}/*`],
-          message: `Dependency-direction violation: this package must not import ${name}.`,
-        })),
+        patterns: [
+          ...workspaces.map((name) => restrict(name, "Dependency-direction violation")),
+          ...frameworks.map((name) => restrict(name, "Framework-boundary violation")),
+        ],
       },
     ],
   },
@@ -34,20 +43,24 @@ const eslintConfig = defineConfig([
       next: { rootDir: "packages/app" },
     },
   },
-  // ui is presentational — no domain/data imports.
-  boundary(["packages/ui/**/*.{ts,tsx}"], [
-    "@devmentor/core",
-    "@devmentor/db",
-    "@devmentor/app",
-  ]),
-  // db is the leaf — knows nothing about the rest.
-  boundary(["packages/db/**/*.{ts,tsx}"], [
-    "@devmentor/core",
-    "@devmentor/ui",
-    "@devmentor/app",
-  ]),
-  // core may use db, but not the UI or the host app.
-  boundary(["packages/core/**/*.{ts,tsx}"], ["@devmentor/ui", "@devmentor/app"]),
+  // ui is presentational — no domain/data imports, and no Next.js (React is a peer dep).
+  boundary(
+    ["packages/ui/**/*.{ts,tsx}"],
+    ["@devmentor/core", "@devmentor/db", "@devmentor/app"],
+    ["next"],
+  ),
+  // db is the leaf — knows nothing about the rest, nor about any UI framework.
+  boundary(
+    ["packages/db/**/*.{ts,tsx}"],
+    ["@devmentor/core", "@devmentor/ui", "@devmentor/app"],
+    ["next", "react"],
+  ),
+  // core may use db, but not the UI, the host app, or any UI framework.
+  boundary(
+    ["packages/core/**/*.{ts,tsx}"],
+    ["@devmentor/ui", "@devmentor/app"],
+    ["next", "react"],
+  ),
   globalIgnores([
     ".next/**",
     "**/.next/**",

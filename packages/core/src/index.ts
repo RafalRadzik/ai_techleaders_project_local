@@ -1,9 +1,102 @@
 export { getEnv, type AppEnv } from './config/env';
 export { createLogger, type Logger } from './logger';
-export { getContainer, withScope, type Cradle } from './container/index';
-export { UserService, type UserDto } from './services/auth/user.service';
+export { systemClock, type Clock } from './time/clock';
+export {
+  getContainer,
+  withRequestScope,
+  withScope,
+  withSessionCookieScope,
+  type Cradle,
+} from './container/index';
+export {
+  readSessionCookie,
+  SESSION_COOKIE_NAME,
+  SessionService,
+  type IssuedSession,
+  type SessionClaims,
+} from './services/auth/session.service';
+export {
+  PasswordService,
+  SCRYPT_KEY_LENGTH,
+  SCRYPT_MAXMEM,
+  SCRYPT_N,
+  SCRYPT_P,
+  SCRYPT_R,
+  SCRYPT_SALT_LENGTH,
+  type PasswordHashingSlot,
+} from './services/auth/password.service';
+export {
+  TokenService,
+  type PurposeTokenClaims,
+  type SignPurposeTokenInput,
+} from './services/auth/token.service';
+export {
+  GITHUB_CALLBACK_PATH,
+  GITHUB_LOGIN_PATTERN,
+  githubCallbackUrl,
+  NoVerifiedEmailError,
+  type AuthorizeUrlInput,
+  type GithubIdentity,
+  type GithubIdentityPort,
+} from './services/auth/github-identity.port';
+export {
+  AccountExistsError,
+  AccountNotLinkedError,
+  INVALID_CREDENTIALS_MESSAGE,
+  LastRoleError,
+  PasswordSignInRefusedError,
+  UserService,
+  type AccountExistsReason,
+  type AccountNotLinkedReason,
+  type AssignableRole,
+  type GithubSignIn,
+  type PasswordRegistration,
+  type PasswordSignIn,
+  type PasswordSignInRefusedReason,
+  type RoleChange,
+  type UserCreateInput,
+  type UserDto,
+} from './services/auth/user.service';
+export {
+  EMAIL_VERIFY_MAIL_SUBJECT,
+  EMAIL_VERIFY_PATH,
+  EMAIL_VERIFY_PURPOSE,
+  EMAIL_VERIFY_TTL_SECONDS,
+  EmailVerificationService,
+  type EmailVerification,
+  type VerificationRecipient,
+} from './services/auth/email-verification.service';
+export {
+  clearOauthStateCookie,
+  createOauthState,
+  OAUTH_STATE_COOKIE_NAME,
+  OAUTH_STATE_COOKIE_PATH,
+  OAUTH_STATE_PURPOSE,
+  OAUTH_STATE_TTL_SECONDS,
+  verifyOauthState,
+  type OauthState,
+  type OauthStateDeps,
+} from './services/auth/oauth-state';
+export {
+  SIGN_IN_CANCELLED_LOCATION,
+  SIGN_IN_ERRORS,
+  SIGN_IN_PATH,
+  signInErrorLocation,
+  signInFailure,
+  verificationFailure,
+  type SignInError,
+} from './services/auth/sign-in-redirect';
+export type { Mailer, MailMessage } from './services/notifications/mailer.port';
+export { homeFor, liveRoles } from './services/auth/roles';
+export {
+  DISPLAY_NAME_MAX_LENGTH,
+  PASSWORD_MAX_BYTES,
+  PASSWORD_MIN_LENGTH,
+  registerSchema,
+  type RegisterInput,
+} from './validators/auth/register.schema';
+export { loginSchema, type LoginInput } from './validators/auth/login.schema';
 export { EventBus, type EventHandler, type EventId, type EventMap } from './events/index';
-export { userCreateSchema, type UserCreateInput } from './validators/auth/user-create.schema';
 
 // Reusable HTTP layer (typed errors, route wrappers, auth guards).
 export * from './http/index';

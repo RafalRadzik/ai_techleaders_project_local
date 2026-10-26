@@ -12,6 +12,12 @@ concurrency:
 
 env:
   NEXT_TELEMETRY_DISABLED: "1"
+  # Obviously fake operator allowlist for the mock identity adapter. Real founder
+  # addresses live only in deployment configuration. The remaining app variables
+  # (SESSION_SECRET, AUTH_IDENTITY_ADAPTER, MAILER_ADAPTER, INTEGRATION_TEST_RUN, ...) are set per run
+  # by tests/integration/environment.ts; the Build job deliberately runs with none,
+  # proving `next build` needs no secrets.
+  OPERATOR_EMAILS: mock-operator@devmentor.test
 
 jobs:
   build:

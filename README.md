@@ -111,6 +111,89 @@ Then open:
 The app **builds and boots even with no database running**; DB-backed pages degrade
 to a visible "unavailable" state instead of crashing.
 
+### Configuration
+
+All variables are validated by the zod schema in `packages/core/src/config/env.ts`;
+`.env.example` documents each one. Beyond the app and database settings above, auth
+and email use:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `APP_URL` | `http://localhost:3000` | Public base URL for OAuth callbacks and email links. |
+| `SESSION_SECRET` | unset | Signs session cookies; at least 32 characters (`openssl rand -base64 48`). **Required in production:** the app refuses to serve without it. Without it in development, sign-in fails closed. |
+| `SESSION_SECRET_PREVIOUS` | unset | Previous secret, still accepted while rotating. At least 32 characters. |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | unset | GitHub OAuth app. When unset, GitHub sign-in fails closed; the app still boots. |
+| `OPERATOR_EMAILS` | empty | Comma-separated operator allowlist, trimmed and case-insensitive. |
+| `TRUSTED_PROXY_HOPS` | `0` | Number of reverse proxies whose `X-Forwarded-For` entries are trusted. |
+| `PASSWORD_HASH_CONCURRENCY` | `4` | Password hashes computed at once. Each scrypt hash uses about 128 MiB. |
+| `PASSWORD_HASH_WAIT_MS` | `5000` | How long a request waits for a free hashing slot before answering `503`. |
+| `MAILER_ADAPTER` | unset | `resend` or `log`. Unset in `development` with no `MAIL_API_KEY`, mail is written to the log (one `mail.sent` line per message, with a warning at boot); otherwise Resend is used. |
+| `MAIL_API_KEY`, `MAIL_FROM` | unset | Resend API key and sender address (on a domain verified in Resend). **Both required in production** unless the harness's `MAILER_ADAPTER=log` pair is set; the app refuses to serve without them. Missing elsewhere, each send fails with `503`. |
+| `AUTH_IDENTITY_ADAPTER` | `github` | `github` or `mock`. |
+| `INTEGRATION_TEST_RUN` | unset | `1` only inside the integration harness. |
+
+`AUTH_IDENTITY_ADAPTER=mock` and `MAILER_ADAPTER=log` are test adapters: the app
+refuses to start when either is set without `INTEGRATION_TEST_RUN=1`. The integration
+harness sets all three — its `waitForMail(to)` helper reads messages back from the app
+log — plus a throwaway `SESSION_SECRET` and
+`OPERATOR_EMAILS=mock-operator@devmentor.test`.
+
+### Setting up GitHub sign-in
+
+1. On GitHub, open **Settings → Developer settings → OAuth Apps → New OAuth App**.
+2. Set **Homepage URL** to your `APP_URL` (locally `http://localhost:3000`) and
+   **Authorization callback URL** to `${APP_URL}/api/auth/github/callback`.
+3. Copy the client ID and a generated client secret into `.env` as
+   `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`.
+4. Generate a session secret with `openssl rand -base64 48` and set it as
+   `SESSION_SECRET`.
+5. Put your GitHub account's verified email in `OPERATOR_EMAILS` if you want the
+   operator role.
+
+Restart `npm run dev`, open `/sign-in` and choose GitHub. After sign-in you land on
+your role's home: `/admin` for operators, `/mentor` for mentors, `/home` for mentees.
+
+The mock identity adapter works only inside the integration harness (it needs
+`INTEGRATION_TEST_RUN=1`), so a development server without the GitHub variables shows
+GitHub sign-in as unavailable. Email sign-in needs only `SESSION_SECRET`.
+
+### Email registration and sign-in
+
+`/register` creates an account with a display name, an email address and a password
+(at least 12 characters, at most 72 bytes). Registering signs nobody in: DevMentor
+emails a link to `/api/auth/verify-email`, valid for 24 hours. The inbox owner chooses
+their final password on the completion screen, which confirms the address and signs
+them in on their role's home (or the page they came from).
+Opening the link alone changes nothing and signs nobody in. The final password
+replaces the one entered at registration; a consumed link cannot change it again.
+Registering again with an unconfirmed address sends a fresh link and the old one stops
+working; this is also how to get a new link after one expires. An address whose
+account signs in with GitHub is refused with a pointer to GitHub sign-in.
+
+`/sign-in` offers GitHub first and the email form below it. A wrong password and an
+unknown address get the same "Invalid credentials" message. An unconfirmed address is
+refused until password completion verifies the address. Too many attempts answer
+`429` with a wait time:
+sign-in allows 10 attempts per IP and 5 per email in 15 minutes, registration 5 per IP
+per hour and 3 verification mails per email per hour, including the first mail.
+Per-email registration limits always apply, even across different IPs. Per-IP limits
+apply only when `TRUSTED_PROXY_HOPS` lets the app safely read the client's address.
+With its default of `0`, registration uses the email limit and hashing concurrency
+gate, not an untrusted forwarded address or a shared global cap. State-changing
+requests are JSON-only; the forms post through `apiCall`, which sends the CSRF header.
+
+**Verification security change (2026-10-26):** existing emailed links still open the
+completion screen, but GET no longer activates an account or issues a session.
+Completion requires a CSRF-protected POST with the link token and the inbox owner's
+chosen password. This deliberately replaces automatic activation; keeping the old
+behavior would let an unsolicited link activate someone else's chosen password.
+
+In development no mail provider is needed. With `MAILER_ADAPTER` and `MAIL_API_KEY`
+unset, the log mailer writes every message to the `npm run dev` terminal as one JSON
+line (`"msg":"mail.sent"`), including the verification link. Copy the link from the
+`text` field into the browser to finish registering. Production sends through Resend
+and needs `MAIL_API_KEY` and `MAIL_FROM`.
+
 ## Scripts
 
 | Command | Description |

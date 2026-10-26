@@ -1,18 +1,19 @@
-import { makeCrudRoute, userCreateSchema } from '@devmentor/core';
+import { makeCrudRoute, requireRole, requireSession } from '@devmentor/core';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Reference CRUD route: `route.ts` is configuration, not logic. The collection
- * verbs (`GET` list, `POST` create) are generated from the service + Zod schema by
- * `makeCrudRoute`; item-level verbs would live in `users/[id]/route.ts` off the same
- * config.
+ * Reference CRUD route: `route.ts` is configuration, not logic. The collection `GET`
+ * list is generated from the service by `makeCrudRoute`; item-level verbs would live in
+ * `users/[id]/route.ts` off the same config. There is no `POST`: accounts are created
+ * by the sign-in flows, never through this endpoint.
  *
- * NOTE: this endpoint is intentionally public for now — it is the migration
- * regression check until real concepts replace it. The `auth` concept will add
- * `authorize: (req) => requireSession(req)` here.
+ * Operator only. `authorize` denies before the service is reached (defence in depth);
+ * `UserService.list` enforces the same rule itself and is the authority.
  */
-export const { GET, POST } = makeCrudRoute({
+export const { GET } = makeCrudRoute({
   resolve: (cradle) => cradle.userService,
-  createSchema: userCreateSchema,
+  authorize: async (req, cradle) => {
+    requireRole(await requireSession(req, cradle), 'operator');
+  },
 });

@@ -1,2 +1,2 @@
-export { getContainer, withScope } from './container';
+export { getContainer, withRequestScope, withScope, withSessionCookieScope } from './container';
 export type { Cradle } from './cradle';

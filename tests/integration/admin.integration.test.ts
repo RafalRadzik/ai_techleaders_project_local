@@ -5,6 +5,7 @@ import {
   closeAgentBrowser,
   integrationArtifactsDirectory,
   runAgentBrowser,
+  signInAs,
 } from './agent-browser';
 
 describe('TC-ADMIN-001 admin panel basics', () => {
@@ -13,7 +14,9 @@ describe('TC-ADMIN-001 admin panel basics', () => {
     const session = inject('adminBrowserSession');
 
     try {
-      await runAgentBrowser(session, 'open', `${baseUrl}/admin`);
+      // `/admin` is operator-only: sign in as the seeded operator first.
+      const { landingPath } = await signInAs(session, baseUrl, 'mock-operator');
+      expect(landingPath).toBe('/admin');
       await runAgentBrowser(session, 'wait', '--text', 'Connected');
       const dashboard = await runAgentBrowser(session, 'snapshot');
 

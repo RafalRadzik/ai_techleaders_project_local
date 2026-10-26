@@ -5,6 +5,8 @@ import {
   closeAgentBrowser,
   integrationArtifactsDirectory,
   runAgentBrowser,
+  sessionCookieHeader,
+  signInAs,
 } from './agent-browser';
 
 /**
@@ -16,8 +18,21 @@ import {
 describe('TC-SETUP-001 setup is idempotent', () => {
   it('leaves exactly one sample mentor after the seeder ran twice', async () => {
     const baseUrl = inject('integrationBaseUrl');
+    // `/api/users` is operator-only: borrow a signed-in operator's session cookie.
+    const session = `devmentor-setup-api-${process.pid}`;
+    let operatorCookie: string;
+    try {
+      operatorCookie = (await signInAs(session, baseUrl, 'mock-operator')).sessionCookie;
+    } catch (error) {
+      await captureBrowserFailure(session, 'setup-api');
+      throw error;
+    } finally {
+      await closeAgentBrowser(session);
+    }
 
-    const response = await fetch(`${baseUrl}/api/users`);
+    const response = await fetch(`${baseUrl}/api/users`, {
+      headers: sessionCookieHeader(operatorCookie),
+    });
     const payload = (await response.json()) as {
       ok: boolean;
       data?: { email: string; displayName: string }[];
@@ -37,6 +52,7 @@ describe('TC-SETUP-001 setup is idempotent', () => {
     const session = `devmentor-setup-${process.pid}`;
 
     try {
+      await signInAs(session, baseUrl, 'mock-operator');
       await runAgentBrowser(session, 'open', `${baseUrl}/admin/users`);
       await runAgentBrowser(session, 'wait', '--text', 'Ada Lovelace');
       const snapshot = await runAgentBrowser(session, 'snapshot');

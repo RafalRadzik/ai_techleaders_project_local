@@ -25,15 +25,24 @@ a breaking change and follows the path in "How to make a breaking change" at the
 ### 1. HTTP API (`packages/app/src/app/api/`)
 
 **The envelope.** Every `/api/*` route built with `apiHandler` or `makeCrudRoute`
-answers `{ ok: true, data }` or `{ ok: false, error: { code, message, fieldErrors? } }`.
+answers `{ ok: true, data }` or
+`{ ok: false, error: { code, message, fieldErrors?, retryAfterSeconds? } }`.
 The shape is declared twice on purpose, in `packages/core/src/http/apiHandler.ts` and
 `packages/ui/src/backend/api/types.ts`, because `ui` must not import `core`.
 
 **Status and error codes**, from `packages/core/src/http/errors.ts` and `apiHandler.ts`:
 400 `bad_request`, 401 `unauthorized`, 403 `forbidden`, 404 `not_found`,
 409 `conflict`, 422 `validation_failed` (with `fieldErrors`, keyed by dotted path or
-`_root`), 500 `internal_error`. The client adds `network_error` and
-`invalid_response` in `apiCall.ts`.
+`_root`), 500 `internal_error`, 503 `service_unavailable` (`ServiceUnavailableError`:
+an integration credential is unset, an upstream call made through `fetchJson` timed
+out or failed, or a capacity gate is saturated; retryable), 429 `rate_limited`
+(`TooManyRequestsError`, added in E01 Slice 4, additive: a rate-limit policy of
+`packages/core/src/http/rate-limit.ts` was exceeded; the envelope carries
+`retryAfterSeconds` and the response a matching `Retry-After` header; the message is
+generic and never reveals whether an email exists). An `AppError` may carry optional
+`headers`, which `apiHandler` copies onto the error response, and an optional
+`retryAfterSeconds`, which it puts in the envelope. The client
+adds `network_error` and `invalid_response` in `apiCall.ts`.
 
 **Routes in place:**
 
@@ -41,10 +50,60 @@ The shape is declared twice on purpose, in `packages/core/src/http/apiHandler.ts
   `{ status: "ok", app, environment, database: "up" | "down", databaseError? }`, HTTP
   200 even when the database is down. `tests/integration/global-setup.ts` polls it and
   waits for `status === "ok"` and `database === "up"`; `README.md` documents it.
-- `GET /api/users` returns `UserDto[]`; `POST /api/users` takes
-  `{ email, displayName }` (`userCreateSchema`) and returns `UserDto`, where
-  `UserDto = { id, email, displayName, createdAt (ISO string), mentorProfile: { id, headline } | null }`.
-  The route is intentionally public until the `auth` concept lands.
+- `GET /api/users` returns `UserDto[]`, where
+  `UserDto = { id, email, displayName, roles, githubLogin, avatarUrl, createdAt (ISO string), mentorProfile: { id, headline } | null }`.
+  It is **operator only**: `401` without a live session, `403` without the `operator`
+  role — enforced by the route's `authorize` and again inside `UserService.list`. It was
+  public until E01 (accounts and roles); `POST /api/users` (`{ email, displayName }`) was
+  removed at the same time — it had no in-repo caller, and accounts are now created only
+  by the sign-in flows.
+- `GET /api/auth/github` and `GET /api/auth/github/callback` (added in E01, additive):
+  browser-navigated, not enveloped. Every outcome is a 302 built with
+  `redirectResponse`: the start route sets the `devmentor_oauth_state` cookie and
+  redirects to GitHub; the callback redirects to the role's home (or a safe
+  `returnTo`) with the `devmentor_session` cookie, or to `/sign-in?error=<code>` on any
+  failure.
+- `POST /api/auth/logout` (added in E01, additive): enveloped, CSRF-checked, no session
+  required. Always answers `{ ok: true, data: null }` with an expiring
+  `devmentor_session` cookie; a live session also has its `session_version` bumped,
+  which revokes every copy of the cookie.
+- `POST /api/auth/register` (added in E01 Slice 4, additive): enveloped, CSRF-checked,
+  public, rate-limited per trusted IP and per email. Body `registerSchema`
+  (`{ email, password, displayName, returnTo? }`, password 12 characters to 72 UTF-8
+  bytes). Answers `{ ok: true, data: { email } }` and sets **no** cookie; the address
+  gets a 24-hour verification link. Initial and repeated verification mails share
+  the three-per-email/hour limit, even when no trusted IP is available.
+  `409 conflict` for an address with a verified account (its message points to GitHub
+  when that account signs in there), `422` with
+  `fieldErrors`, `429 rate_limited`, `503` when the mail is not sent.
+- `POST /api/auth/login` (added in E01 Slice 4, additive): enveloped, CSRF-checked,
+  public, rate-limited per IP and per email. Body `loginSchema`
+  (`{ email, password, returnTo? }`). Answers
+  `{ ok: true, data: UserDto & { landingPath } }` with the `devmentor_session` cookie.
+  `landingPath` is the one field beyond `UserDto`: the body's `returnTo` when
+  `safeReturnTo` accepts it, else `homeFor` of the session's effective roles; the
+  client navigates there. Failures set no cookie: `401 unauthorized` with the generic
+  message "Invalid credentials" for an unknown email and a wrong password alike,
+  `403 forbidden` for the right password on an unverified address or an account with
+  no active role, `422`, `429 rate_limited`, `503` when the hashing gate is saturated.
+- `GET /api/auth/verify-email?token=` (added in E01 Slice 4, additive):
+  browser-navigated, not enveloped; every outcome is a 302. As of the user-approved
+  security correction of 2026-10-26, it opens `/verify-email` for password completion
+  and never verifies an address, changes a password, or sets a session cookie.
+  The link format (`APP_URL` + this path + `?token=`) and existing token format remain
+  supported for outstanding links. Invalid/expired/superseded/consumed links cannot
+  complete verification.
+- `POST /api/auth/verify-email` (added in the 2026-10-26 correction): enveloped,
+  JSON-only and CSRF-checked. The inbox owner supplies the link token and a chosen
+  password meeting registration's rules. Completion atomically replaces the
+  registration credential, verifies the address, and bumps `session_version`,
+  then issues a session and returns the safe `landingPath`. A consumed link cannot
+  reset the password or sign in again.
+
+  **Intentional breaking security correction:** GET previously verified and signed
+  in, including on a replay. That behavior is removed without an insecure bridge;
+  existing links instead lead to the new password-completion screen. See
+  `.ai/specs/2026-10-26-accounts-review-remediation.md` and `README.md`.
 - `makeCrudRoute` behavior asserted by `packages/core/src/http/makeCrudRoute.test.ts`:
   the default id parameter `id`, and the messages "This operation is not supported",
   "Missing resource id", and "Request body must be valid JSON".
@@ -65,21 +124,66 @@ The `exports` maps in each `package.json` and the named exports behind them are 
 API between packages. `npm run typecheck` is the consumer check.
 
 - `@devmentor/core` (`.`, `./container`, `./services`, `./http`, `./events`,
-  `./validators/*`): `getEnv`, `createLogger`, `getContainer`, `withScope`, the
-  `Cradle` keys (`env`, `logger`, `orm`, `eventBus`, `em`, `userService`),
-  `UserService` and `UserDto`, the `AppError` family and `isAppError`, `apiHandler`,
+  `./validators/*`): `getEnv`, `createLogger`, `getContainer`, `withScope`,
+  `withRequestScope(req, fn)`, `withSessionCookieScope(cookieValue, fn)`, the
+  `Cradle` keys (`env`, `logger`, `orm`, `clock`, `eventBus`, `sessionService`,
+  `tokenService`, `passwordService`, `identity`, `em`, `userService`, the scoped
+  `rateLimiter` (added in E01 Slice 4), and the scoped, lazy
+  `session: Promise<Session | null>`), `UserService` and `UserDto`, the `AppError`
+  family and `isAppError`, `apiHandler(logic, { csrf? })` with `ApiHandlerOptions`,
   `jsonOk`, `jsonError`, `makeCrudRoute` with `CrudService` and
-  `MakeCrudRouteOptions`, `readSession`, `requireSession`, `requireRole`,
-  `assertOwnership`, `Session`, `Role` (`'student' | 'mentor'`), `EventBus`,
-  `EventMap`, `userCreateSchema`, and the re-exported `checkDbConnection`.
+  `MakeCrudRouteOptions`, `requireSession(req, cradle)`, `requireRole`,
+  `requireCsrfHeader`, `CSRF_HEADER_NAME`, `assertOwnership`, `Session`
+  (`{ userId, roles: readonly [Role, ...Role[]] }`), `Role`
+  (`'mentee' | 'mentor' | 'operator'`), `EventBus`, `EventMap`, and the re-exported
+  `checkDbConnection`. Added in E01 (additive): `ServiceUnavailableError`;
+  `TooManyRequestsError` and the rate limiter (`RateLimiter` with `consume`/`consumeAll`,
+  `RateLimitPolicy`, `RateLimitCheck`, the policy constants `SIGN_IN_PER_IP`,
+  `SIGN_IN_PER_EMAIL`, `REGISTRATION_PER_IP`, `VERIFICATION_RESEND_PER_EMAIL`,
+  `LONGEST_RATE_LIMIT_WINDOW_MS`, the key helpers `rateLimitKey`, `clientIp`,
+  `signInLimits`, `registrationLimits`, `verificationResendLimits`, and
+  `guardCredentialAttempt`, which fixes the gate → limit → hash ordering);
+  `systemClock` and `Clock`; `SessionService` (`SESSION_COOKIE_NAME`,
+  `readSessionCookie`, `SessionClaims`, `IssuedSession`) and `TokenService`
+  (`PurposeTokenClaims`, `SignPurposeTokenInput`); the GitHub identity port
+  (`GithubIdentityPort`, `GithubIdentity`, `GITHUB_CALLBACK_PATH`,
+  `githubCallbackUrl`, `NoVerifiedEmailError`); the OAuth state helpers
+  (`createOauthState`, `verifyOauthState`, `clearOauthStateCookie`,
+  `OAUTH_STATE_COOKIE_NAME`, ...); the sign-in redirect helpers (`SIGN_IN_PATH`,
+  `SIGN_IN_ERRORS`, `signInErrorLocation`, `signInFailure`, and from Slice 4 the
+  `verification` code and `verificationFailure`); the body helpers `parseJsonBody`,
+  `readJsonBody` and `validateWith` (Slice 4; `makeCrudRoute` uses the same two steps,
+  so a bad body answers identically); `homeFor` (the single
+  landing decision: `operator → /admin`, `mentor → /mentor`, else `/home`) and
+  `liveRoles`; the cookie helpers `readCookie`, `serializeCookie`, `redirectResponse`
+  with `CookieAttributes`; `fetchJson` (the outbound-call wrapper with a timeout,
+  `DEFAULT_OUTBOUND_TIMEOUT_MS`); `safeReturnTo`; and on `UserService`,
+  `AccountNotLinkedError`, `LastRoleError`, `RoleChange`, `AssignableRole`.
+  `EmailVerificationService.verify(token, password)` requires the inbox owner's final
+  password as of the 2026-10-26 security correction; the old token-only activation
+  call is not retained. Its in-repo route and test consumers migrate together.
+  The additive `verifyEmailSchema` is available through the validators subpath.
+  `requireSession(req, cradle)` replaced the
+  stubbed `requireSession(req)`, `Session.roles` replaced `Session.role`, `student`
+  became `mentee`, and the unverified `readSession` was removed — the only way to
+  obtain a `Session` is the live check (cookie, user row, `session_version`, stored
+  roles with `operator` resolved against `OPERATOR_EMAILS`). `userCreateSchema` (and
+  `validators/auth/user-create.schema`) was removed with `POST /api/users`; it had no
+  consumer. `UserService.create` takes the explicit `UserCreateInput`
+  (`{ email, displayName }`, still exported) and copies only those two fields, so it
+  cannot set `roles` or any other column. `UserService` also takes the scoped `session`
+  as a constructor dependency, and `list()` requires an `operator` session.
 - `@devmentor/db` (`.`, `./entities`, `./config`): `User`, `MentorProfile`, `IUser`,
-  `IMentorProfile`, `baseProperties`, `entities`, `createOrmConfig`, `getOrm`,
+  `IMentorProfile`, `AuthRateLimit` and `IAuthRateLimit` (added in E01 Slice 4), `baseProperties`, `entities`, `createOrmConfig`, `getOrm`,
   `closeOrm`, `checkDbConnection`, `getDbEnv`, `MikroORM`, `EntityManager`, and the
   re-exported `EntityRepository`, `FilterQuery`, `Loaded`, `RequiredEntityData`.
 - `@devmentor/ui` (`.`, `./backend`, `./tokens.css`, `./lib/utils`, `./components/*`):
   `cn`, `Button` and `buttonVariants`, the `Card*` family; from `./backend`:
   `apiCall`, `apiCallOrThrow`, `ApiError`, `ApiCallOptions`, `ApiResult`,
-  `FieldErrors`, `CrudForm` with `CrudField`, `CrudFieldType`, `CrudFormProps`,
+  `FieldErrors`, `CrudForm` with `CrudField`, `CrudFieldType`, `CrudFormProps`
+  (including the `password` field type; Slice 4 added the optional `pendingLabel`,
+  `hiddenValues` and `renderError` props, with `CrudFormError`; server `fieldErrors`
+  for a name the form does not render join the form-level alert),
   `DataTable` with `Column`, `DataTableProps`, `DataTablePagination`,
   `LoadingMessage`, `ErrorMessage`, `EmptyState`; from `./tokens.css`: the CSS
   variable names (`--background`, `--foreground`, `--primary`, `--destructive`,
@@ -99,7 +203,12 @@ the change spans several concepts; note it in the PR body.
   `display_name`) and `mentor_profiles` (`id`, timestamps, `user_id` unique with a
   cascading foreign key to `users`, `headline`, `bio` nullable,
   `years_of_experience` default 0). Column names are snake_case mappings of the
-  camelCase entity properties.
+  camelCase entity properties. `auth_rate_limits` (added in E01 Slice 4,
+  `Migration20261023135729_auth_rate_limit`): `key` text primary key
+  (`<scope>:<kind>:<sha256hex>`, never a raw email or IP), `window_start` timestamptz
+  indexed, `count` int — the one table without the uuid id and timestamps, and written
+  only by `RateLimiter`'s raw SQL. Its rows are short-lived counters: dropping or
+  emptying it only resets the current windows.
 - Migrations live in `packages/db/migrations/Migration<timestamp>.ts` next to the
   committed snapshot `.snapshot-devmentor.json`, run transactionally, and are
   generated with `npm run db:migration:create -- --name <x>`. The integration harness
@@ -154,7 +263,9 @@ maintainer updates the ruleset before the PR merges, otherwise the PR blocks its
 ### 6. Domain events (`packages/core/src/events/event-map.ts`)
 
 Event ids follow `concept.entity.action`. Today: `auth.user.created` with payload
-`{ userId, email }`, subscribed in `packages/core/src/container/container.ts`.
+`{ userId, email }`, and `auth.user.roles_changed` with payload
+`{ userId, roles, previousRoles }` (added in E01, additive), both subscribed in
+`packages/core/src/container/container.ts`.
 
 **Breaking:** renaming an event id; removing or retyping a payload field.
 
@@ -163,14 +274,22 @@ PR; adding a payload field is additive.
 
 ### 7. Session and CSRF conventions
 
-The session cookie name `devmentor_session` and the `Role` union live in
-`packages/core/src/http/auth.ts`; the CSRF header `x-devmentor-request` is set by
-`apiCall` in `packages/ui/src/backend/api/apiCall.ts`. Real session verification and
-the server-side header check are not implemented yet; every guarded route currently
-denies.
+The session cookie name `devmentor_session` lives in
+`packages/core/src/services/auth/session.service.ts`. The short-lived OAuth state cookie
+`devmentor_oauth_state` (path `/api/auth/github`, 10 minutes, added in E01) lives in
+`packages/core/src/services/auth/oauth-state.ts`. The `Role` union
+(`'mentee' | 'mentor' | 'operator'`) and the CSRF header name live in
+`packages/core/src/http/auth.ts`. The CSRF header `x-devmentor-request` is set by
+`apiCall` in `packages/ui/src/backend/api/apiCall.ts` on every request and is
+**enforced by `apiHandler` on every `/api/*` request whose method is not `GET`, `HEAD`
+or `OPTIONS`** — including `makeCrudRoute`'s `POST`/`PUT`/`DELETE` — with a 403
+`forbidden` before the route body runs. Its presence is checked, not its value. The
+only opt-out, `apiHandler(logic, { csrf: false })`, is reserved for the webhook route.
+Every state-changing route is therefore JSON-only and called through `apiCall` or
+`CrudForm`, never a native HTML form.
 
-**Breaking:** once auth ships, renaming the cookie or the header, or changing the
-`Role` values.
+**Breaking:** renaming either cookie or the header, changing the `Role` values, or
+relaxing which methods require the header.
 
 **Required path:** change `core/src/http/auth.ts` and `ui/src/backend/api/apiCall.ts`
 together, with an integration scenario covering the denied path.

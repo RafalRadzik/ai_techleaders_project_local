@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { z } from 'zod';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -25,6 +25,14 @@ export interface CrudField {
   options?: { label: string; value: string }[];
 }
 
+/** A request failure that is not about one field: the server's code and message. */
+export interface CrudFormError {
+  code: string;
+  message: string;
+  /** Present on `rate_limited`: seconds until another attempt can succeed. */
+  retryAfterSeconds?: number;
+}
+
 export interface CrudFormProps<T> {
   /** The same Zod schema used server-side — client validation reuses it (DRY). */
   schema: z.ZodType<T>;
@@ -35,6 +43,18 @@ export interface CrudFormProps<T> {
   method?: 'POST' | 'PUT';
   initialValues?: Record<string, unknown>;
   submitLabel?: string;
+  /** Submit label while the request is pending. Defaults to `Saving…`. */
+  pendingLabel?: string;
+  /**
+   * Values submitted with the fields but not rendered, e.g. a sanitised `returnTo`.
+   * The schema still validates them; a field of the same name wins.
+   */
+  hiddenValues?: Record<string, unknown>;
+  /**
+   * Copy for a failure that is not about one field. Return `undefined` to show the
+   * server's message. Rendered inside the form's alert, so it may include links.
+   */
+  renderError?: (error: CrudFormError) => ReactNode;
   onSuccess?: (data: unknown) => void;
   onCancel?: () => void;
   /** Lets a composition disable competing actions while this request is pending. */
@@ -56,6 +76,20 @@ function defaultValueFor(field: CrudField): unknown {
   return '';
 }
 
+/**
+ * Server field errors keyed by a name this form does not render (e.g. a hidden value)
+ * would otherwise be invisible, so they join the form-level `_root` alert.
+ */
+function placeFieldErrors(serverErrors: FieldErrors, fields: CrudField[]): FieldErrors {
+  const rendered = new Set(fields.map((field) => field.name));
+  const placed: FieldErrors = {};
+  for (const [key, messages] of Object.entries(serverErrors)) {
+    const target = key === '_root' || rendered.has(key) ? key : '_root';
+    (placed[target] ??= []).push(...messages);
+  }
+  return placed;
+}
+
 const fieldClassName = 'dm-input w-full';
 
 /**
@@ -71,6 +105,9 @@ export function CrudForm<T>({
   method = 'POST',
   initialValues,
   submitLabel = 'Save',
+  pendingLabel = 'Saving…',
+  hiddenValues,
+  renderError,
   onSuccess,
   onCancel,
   onSubmittingChange,
@@ -87,7 +124,7 @@ export function CrudForm<T>({
     return initial;
   });
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [formError, setFormError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<CrudFormError | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -106,7 +143,7 @@ export function CrudForm<T>({
     if (pending.current) return;
     setFormError(null);
     // Coerce empty number inputs to undefined so the schema's own rules apply.
-    const candidate: Record<string, unknown> = {};
+    const candidate: Record<string, unknown> = { ...hiddenValues };
     for (const field of fields) {
       const raw = values[field.name];
       candidate[field.name] =
@@ -129,20 +166,24 @@ export function CrudForm<T>({
         onSuccess?.(result.data);
       } else if (result.error.fieldErrors) {
         focusError.current = true;
-        setFieldErrors(result.error.fieldErrors);
+        setFieldErrors(placeFieldErrors(result.error.fieldErrors, fields));
       } else {
         focusError.current = true;
-        setFormError(result.error.message);
+        const { code, message, retryAfterSeconds } = result.error;
+        setFormError({ code, message, ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }) });
       }
     } catch {
       focusError.current = true;
-      setFormError('We could not complete the request. Try again; your entries are still here.');
+      setFormError({
+        code: 'network_error',
+        message: 'We could not complete the request. Try again; your entries are still here.',
+      });
     } finally {
       pending.current = false;
       setSubmitting(false);
       onSubmittingChange?.(false);
     }
-  }, [endpoint, fields, method, onSuccess, onSubmittingChange, schema, values]);
+  }, [endpoint, fields, hiddenValues, method, onSuccess, onSubmittingChange, schema, values]);
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLFormElement>) => {
@@ -263,7 +304,9 @@ export function CrudForm<T>({
       {fieldErrors._root?.length ? <div role="alert" tabIndex={-1} data-form-error className="dm-form-error">
         {fieldErrors._root.map((message) => <p key={message}>{message}</p>)}
       </div> : null}
-      {formError ? <p role="alert" tabIndex={-1} data-form-error className="dm-form-error">{formError}</p> : null}
+      {formError ? <div role="alert" tabIndex={-1} data-form-error className="dm-form-error">
+        {renderError?.(formError) ?? formError.message}
+      </div> : null}
 
       <div className="dm-form-actions">
         {onCancel ? (
@@ -272,7 +315,7 @@ export function CrudForm<T>({
           </Button>
         ) : null}
         <Button type="submit" disabled={submitting}>
-          {submitting ? 'Saving…' : submitLabel}
+          {submitting ? pendingLabel : submitLabel}
         </Button>
       </div>
     </form>

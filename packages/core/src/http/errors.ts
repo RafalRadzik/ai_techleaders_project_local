@@ -5,23 +5,31 @@
  */
 export type FieldErrors = Record<string, string[]>;
 
+export type AppErrorOptions = {
+  fieldErrors?: FieldErrors;
+  cause?: unknown;
+  /** Extra response headers `apiHandler` copies onto the error response. */
+  headers?: Record<string, string>;
+  /** Seconds until a retry can succeed; `apiHandler` puts it in the error envelope. */
+  retryAfterSeconds?: number;
+};
+
 export class AppError extends Error {
   readonly status: number;
   readonly code: string;
   readonly fieldErrors?: FieldErrors;
+  readonly headers?: Record<string, string>;
+  readonly retryAfterSeconds?: number;
 
-  constructor(
-    message: string,
-    status: number,
-    code: string,
-    options?: { fieldErrors?: FieldErrors; cause?: unknown },
-  ) {
+  constructor(message: string, status: number, code: string, options?: AppErrorOptions) {
     super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
     // `new.target.name` gives the concrete subclass name (e.g. `NotFoundError`).
     this.name = new.target.name;
     this.status = status;
     this.code = code;
     this.fieldErrors = options?.fieldErrors;
+    this.headers = options?.headers;
+    this.retryAfterSeconds = options?.retryAfterSeconds;
   }
 }
 
@@ -58,6 +66,33 @@ export class ConflictError extends AppError {
 export class ValidationError extends AppError {
   constructor(message = 'Validation failed', fieldErrors?: FieldErrors) {
     super(message, 422, 'validation_failed', { fieldErrors });
+  }
+}
+
+/**
+ * An integration the request depends on is unavailable: a credential is unset, an
+ * upstream call failed or timed out, or a local capacity gate is saturated. Retryable.
+ */
+export class ServiceUnavailableError extends AppError {
+  constructor(
+    message = 'Service temporarily unavailable',
+    options?: { cause?: unknown; headers?: Record<string, string> },
+  ) {
+    super(message, 503, 'service_unavailable', options);
+  }
+}
+
+/**
+ * A rate limit (primitive B8) was exceeded. The message is deliberately generic — it never
+ * says whether the email exists. `retryAfterSeconds` reaches the client twice: in the
+ * envelope and as the `Retry-After` header.
+ */
+export class TooManyRequestsError extends AppError {
+  constructor(retryAfterSeconds: number, message = 'Too many attempts. Try again later.') {
+    super(message, 429, 'rate_limited', {
+      retryAfterSeconds,
+      headers: { 'retry-after': String(retryAfterSeconds) },
+    });
   }
 }
 

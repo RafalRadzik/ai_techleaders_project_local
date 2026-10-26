@@ -184,11 +184,22 @@ explicit**, not the one that looks more "enterprise."
 
 ### Security & Validation — Minimum Requirements
 
-- **Password hashing:** `bcrypt`/`bcryptjs`, cost factor **≥ 12** (OWASP's floor is
-  10; raise it since this is a small user base and the extra ~50ms per login is free).
-  If a faster/stronger option becomes desirable later, the documented upgrade path is
-  `argon2id` (memory ≥ 19 MiB, iterations ≥ 2, parallelism 1) — don't switch without a
-  reason, but don't invent a third option either.
+- **Password hashing:** `node:crypto` `scrypt` at OWASP's parameters, **N=2¹⁷, r=8,
+  p=1** (64-byte key, 16-byte random salt), with `maxmem` raised explicitly — Node's
+  32 MiB default is below the ~128 MiB these parameters need, so the call would
+  otherwise throw. Every hash runs behind a **process-wide concurrency gate**
+  (`PASSWORD_HASH_CONCURRENCY`, waiting up to `PASSWORD_HASH_WAIT_MS` before a `503`)
+  so concurrent logins cannot allocate unbounded memory. Hashes are stored as
+  `scrypt$N=…,r=…,p=…$<salt>$<key>` so raised parameters still verify old rows.
+  *Amended by E01 (`2026-09-04-accounts-and-roles.md`, primitive B9):* this bullet
+  previously said `bcrypt`/`bcryptjs` cost ≥ 12 with "the extra ~50 ms per login is
+  free". That figure describes the native binding; `bcryptjs` is pure JavaScript,
+  chunked through `setImmediate` on the **main thread**, so cost 12 stalls the whole
+  Next server for about a second per attempt. `scrypt` runs on the libuv threadpool
+  and adds no dependency. If a faster/stronger option becomes desirable later, the
+  documented upgrade path is still `argon2id` (memory ≥ 19 MiB, iterations ≥ 2,
+  parallelism 1) — don't switch without a reason, but don't invent a third option
+  either.
 - **JWT:** signed with `HS256` minimum, using a secret ≥ 32 random bytes loaded from
   `env.ts` (zod-validated) — never hardcoded, never committed. Short expiry (e.g. 24h);
   there is no refresh-token flow in MVP scope — document that as a known limitation,

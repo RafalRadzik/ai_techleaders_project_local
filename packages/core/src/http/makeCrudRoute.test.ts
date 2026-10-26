@@ -10,11 +10,13 @@ import {
 
 const testState = vi.hoisted(() => ({
   cradle: {} as unknown,
-  withScope: vi.fn(),
+  withRequestScope: vi.fn(),
 }));
 
+vi.mock('@devmentor/db', () => ({ User: {}, USER_ROLES: ['mentee', 'mentor', 'operator'] }));
+
 vi.mock('../container/container', () => ({
-  withScope: testState.withScope,
+  withRequestScope: testState.withRequestScope,
 }));
 
 type Entity = { id: string; name: string };
@@ -29,11 +31,14 @@ function context(params?: Record<string, string | string[]>): ApiRouteContext {
 }
 
 function request(method: string, body?: string): Request {
+  // `apiCall` sends the CSRF header on every request; `apiHandler` requires it on mutations.
   return new Request('http://devmentor.test/api/resources', {
     method,
-    ...(body === undefined
-      ? {}
-      : { body, headers: { 'content-type': 'application/json' } }),
+    headers: {
+      'x-devmentor-request': '1',
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+    },
+    ...(body === undefined ? {} : { body }),
   });
 }
 
@@ -66,8 +71,8 @@ function route(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  testState.withScope.mockImplementation(
-    async (callback: (cradle: Cradle) => Promise<unknown>) =>
+  testState.withRequestScope.mockImplementation(
+    async (_req: Request, callback: (cradle: Cradle) => Promise<unknown>) =>
       callback(testState.cradle as Cradle),
   );
 });
@@ -291,4 +296,33 @@ describe('makeCrudRoute DELETE', () => {
       error: { message: 'This operation is not supported' },
     });
   });
+});
+
+describe('makeCrudRoute request scope and CSRF', () => {
+  it('runs every verb in a request scope bound to the incoming request', async () => {
+    const req = request('GET');
+    await route(service()).GET(req, context());
+    expect(testState.withRequestScope).toHaveBeenCalledWith(req, expect.any(Function));
+  });
+
+  it.each(['POST', 'PUT', 'DELETE'] as const)(
+    'inherits the CSRF check: %s without the header is 403 and never opens a scope',
+    async (method) => {
+      const currentService = service();
+      const handlers = route(currentService);
+      const req = new Request('http://devmentor.test/api/resources', {
+        method,
+        body: JSON.stringify({ name: 'Grace' }),
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const response = await handlers[method](req, context({ id: '1' }));
+
+      expect(response.status).toBe(403);
+      expect(testState.withRequestScope).not.toHaveBeenCalled();
+      expect(currentService.create).not.toHaveBeenCalled();
+      expect(currentService.update).not.toHaveBeenCalled();
+      expect(currentService.delete).not.toHaveBeenCalled();
+    },
+  );
 });

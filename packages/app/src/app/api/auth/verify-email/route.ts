@@ -1,34 +1,38 @@
 import {
   apiHandler,
-  BadRequestError,
+  ForbiddenError,
   homeFor,
+  jsonOk,
+  parseJsonBody,
   redirectResponse,
   safeReturnTo,
   signInErrorLocation,
-  verificationFailure,
   withRequestScope,
 } from '@devmentor/core';
+import { verifyEmailSchema } from '@devmentor/core/validators/auth/verify-email.schema';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * The link in the verification email (#13). Browser-navigated, so every outcome is a 302
- * and never a JSON envelope: a valid link sets the session cookie and lands on the link's
- * `returnTo` (re-sanitised) or the role home; a valid link for an account with no active
- * role signs nobody in; an invalid, expired or superseded link goes to
- * `/sign-in?error=verification`; anything else to `/sign-in?error=unavailable`.
- */
+/** Preserve emailed URLs without activating credentials or issuing a session on GET. */
 export const GET = apiHandler(async (req) => {
   const token = new URL(req.url).searchParams.get('token');
-  try {
-    if (!token) throw new BadRequestError('Missing token');
-    return await withRequestScope(req, async ({ emailVerificationService }) => {
-      const { roles, cookie, returnTo } = await emailVerificationService.verify(token);
-      const [primary, ...others] = roles;
-      if (!cookie || !primary) return redirectResponse(signInErrorLocation('no_active_role'));
-      return redirectResponse(safeReturnTo(returnTo, homeFor([primary, ...others])), [cookie]);
-    });
-  } catch (error) {
-    return verificationFailure(error);
-  }
+  const location = token
+    ? `/verify-email?${new URLSearchParams({ token })}`
+    : signInErrorLocation('verification');
+  return redirectResponse(location);
+});
+
+/** JSON-only completion; apiHandler enforces the shared CSRF header before parsing. */
+export const POST = apiHandler(async (req) => {
+  const { token, password } = await parseJsonBody(req, verifyEmailSchema);
+  return withRequestScope(req, async ({ emailVerificationService }) => {
+    const { roles, cookie, returnTo } = await emailVerificationService.verify(token, password);
+    const [primary, ...others] = roles;
+    if (!cookie || !primary) throw new ForbiddenError('This account has no active role.');
+    return jsonOk(
+      { landingPath: safeReturnTo(returnTo, homeFor([primary, ...others])) },
+      200,
+      { 'set-cookie': cookie },
+    );
+  });
 });

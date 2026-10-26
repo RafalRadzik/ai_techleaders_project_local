@@ -32,7 +32,7 @@ export default async function RegisterPage({
   return (
     <AuthLayout
       title="Create your account"
-      description="Continue with GitHub, or register with your email address and a password. We email you a link to confirm the address before your first sign-in."
+      description="Continue with GitHub, or register with your email address and a password. Open the email link, then choose your final password to confirm the address and sign in."
       footer={<Link href="/">Back to the home page</Link>}
     >
       <RegisterForm

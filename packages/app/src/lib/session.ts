@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import {
+  createLogger,
   ForbiddenError,
   homeFor,
   SESSION_COOKIE_NAME,
@@ -48,6 +49,7 @@ async function loadPageSession(): Promise<PageSessionState> {
     if (error instanceof ServiceUnavailableError) return 'signed_out';
     // An operator-only account removed from the allowlist: valid cookie, no authority.
     if (error instanceof ForbiddenError) return 'no_active_role';
+    createLogger().error({ err: error }, 'Page session lookup failed');
     throw error;
   }
 }
@@ -106,6 +108,7 @@ export async function requirePageUser(role: Role, currentPath: string): Promise<
     return { session, user };
   } catch (error) {
     if (error instanceof UnauthorizedError) redirect(signInLocation(currentPath));
+    createLogger().error({ err: error }, 'Page user lookup failed');
     throw error;
   }
 }

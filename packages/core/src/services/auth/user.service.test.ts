@@ -19,6 +19,7 @@ import {
   REGISTRATION_PER_IP,
   SIGN_IN_PER_EMAIL,
   SIGN_IN_PER_IP,
+  VERIFICATION_RESEND_PER_EMAIL,
   rateLimitKey,
   type RateLimitCheck,
   type RateLimiter,
@@ -132,6 +133,7 @@ function makeService(
   operatorEmails: string[] = [],
   session: Session | null = OPERATOR,
   verification?: Pick<EmailVerificationService, 'send'>,
+  trustedProxyHops = 1,
 ) {
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const eventBus = { emit: vi.fn(async () => undefined) };
@@ -156,7 +158,7 @@ function makeService(
     }),
   };
   const rateLimiter = {
-    consumeAll: vi.fn(async () => {
+    consumeAll: vi.fn<(checks: readonly RateLimitCheck[]) => Promise<void>>(async () => {
       steps.push('consume');
     }),
   };
@@ -171,7 +173,7 @@ function makeService(
     logger: logger as unknown as Logger,
     eventBus: eventBus as unknown as EventBus,
     clock: { now: () => NOW },
-    env: { OPERATOR_EMAILS: operatorEmails, TRUSTED_PROXY_HOPS: 1 },
+    env: { OPERATOR_EMAILS: operatorEmails, TRUSTED_PROXY_HOPS: trustedProxyHops },
     // A getter, like awilix's PROXY cradle: reading it is what resolves the session.
     get session() {
       return sessionRead();
@@ -802,6 +804,10 @@ const REQ = new Request('https://devmentor.example/api/auth', {
 });
 const REGISTRATION_CHECKS: RateLimitCheck[] = [
   { key: rateLimitKey('registration', 'ip', CLIENT_IP), policy: REGISTRATION_PER_IP },
+  {
+    key: rateLimitKey('verification-resend', 'email', 'new@example.com'),
+    policy: VERIFICATION_RESEND_PER_EMAIL,
+  },
 ];
 const signInChecks = (email: string): RateLimitCheck[] => [
   { key: rateLimitKey('sign-in', 'ip', CLIENT_IP), policy: SIGN_IN_PER_IP },
@@ -921,13 +927,77 @@ describe('UserService.registerWithPassword — the state matrix', () => {
   });
 
   it('a rate-limited attempt neither hashes nor reads users', async () => {
-    const { service, steps, rateLimiter, slot } = makeService(em);
+    const { service, steps, rateLimiter, slot, emailVerificationService } = makeService(em);
     const limited = new TooManyRequestsError(60);
     rateLimiter.consumeAll.mockRejectedValueOnce(limited);
 
     await expect(service.registerWithPassword(registration(), REQ)).rejects.toBe(limited);
     expect(steps).toEqual(['slot']);
     expect(slot.hash).not.toHaveBeenCalled();
+    expect(em.findOne).not.toHaveBeenCalled();
+    expect(emailVerificationService.send).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 1])(
+    'limits initial and repeat verification mail across client IPs with %i trusted proxy hops',
+    async (trustedProxyHops) => {
+      const { service, rateLimiter, slot, steps, emailVerificationService } =
+        makeService(em, [], null, undefined, trustedProxyHops);
+      const counts = new Map<string, number>();
+      rateLimiter.consumeAll.mockImplementation(async (checks) => {
+        steps.push('consume');
+        for (const { key, policy } of checks) {
+          const count = (counts.get(key) ?? 0) + 1;
+          counts.set(key, count);
+          if (count > policy.limit) throw new TooManyRequestsError(3600);
+        }
+      });
+      const request = (attempt: number) =>
+        new Request('https://devmentor.example/api/auth/register', {
+          headers: { 'x-forwarded-for': `203.0.113.${attempt + 1}` },
+        });
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await service.registerWithPassword(registration(), request(attempt));
+      }
+      expect(em.rows).toHaveLength(1);
+      expect(slot.hash).toHaveBeenCalledTimes(3);
+      expect(emailVerificationService.send).toHaveBeenCalledTimes(3);
+      steps.length = 0;
+      em.findOne.mockClear();
+
+      await expect(service.registerWithPassword(registration(), request(3))).rejects.toMatchObject({
+        status: 429,
+        retryAfterSeconds: 3600,
+      });
+      expect(steps).toEqual(['slot', 'consume']);
+      expect(slot.hash).toHaveBeenCalledTimes(3);
+      expect(emailVerificationService.send).toHaveBeenCalledTimes(3);
+      expect(em.findOne).not.toHaveBeenCalled();
+      const checks = rateLimiter.consumeAll.mock.calls[3]![0];
+      expect(checks).toEqual([
+        ...(trustedProxyHops === 0 ? [] : [{
+          key: rateLimitKey('registration', 'ip', '203.0.113.4'),
+          policy: REGISTRATION_PER_IP,
+        }]),
+        REGISTRATION_CHECKS[1],
+      ]);
+
+      await expect(service.registerWithPassword(
+        registration({ email: 'other@example.com' }),
+        request(3),
+      )).resolves.toEqual({ email: 'other@example.com' });
+    },
+  );
+
+  it('a saturated registration hashing gate consumes no limits and sends no mail', async () => {
+    const { service, passwordService, rateLimiter, slot, emailVerificationService } = makeService(em);
+    const unavailable = new ServiceUnavailableError('Password hashing is busy');
+    passwordService.withSlot.mockRejectedValueOnce(unavailable);
+
+    await expect(service.registerWithPassword(registration(), REQ)).rejects.toBe(unavailable);
+    expect(rateLimiter.consumeAll).not.toHaveBeenCalled();
+    expect(slot.hash).not.toHaveBeenCalled();
+    expect(emailVerificationService.send).not.toHaveBeenCalled();
     expect(em.findOne).not.toHaveBeenCalled();
   });
 
@@ -1084,7 +1154,7 @@ describe('UserService.authenticateWithPassword', () => {
     expect(error).toMatchObject({
       status: 403,
       reason: 'email_unverified',
-      message: 'Confirm your email address first. Open the link in the email we sent you, then sign in.',
+      message: 'Confirm your email address first. Open the link in the email we sent you and set your password.',
     });
   });
 
@@ -1135,6 +1205,7 @@ describe('UserService password flows — claiming issues no session until verifi
       tokenService: new TokenService({ env, clock }),
       sessionService: new SessionService({ env, clock }),
       userService: { reconcileOperator: (id: string) => service.reconcileOperator(id) },
+      passwordService: { hash: async (plain) => `hash:${plain}` },
       mailer: {
         send: async ({ text }) => {
           links.push(new URL(text.split('\n').find((line) => line.startsWith('https://'))!).searchParams.get('token')!);
@@ -1155,12 +1226,16 @@ describe('UserService password flows — claiming issues no session until verifi
     await expect(
       service.authenticateWithPassword(login('ada@example.com', 'first attempt'), REQ),
     ).rejects.toMatchObject({ message: INVALID_CREDENTIALS_MESSAGE });
-    await expect(verification.verify(links[0]!)).rejects.toMatchObject({ status: 400 });
+    const finalPassword = 'inbox owner final password';
+    await expect(verification.verify(links[0]!, finalPassword)).rejects.toMatchObject({ status: 400 });
     expect(victim.emailVerifiedAt).toBeNull();
 
-    const verified = await verification.verify(links[1]!);
+    const verified = await verification.verify(links[1]!, finalPassword);
     expect(verified.cookie).toEqual(expect.any(String));
-    await expect(service.authenticateWithPassword(login(), REQ)).resolves.toMatchObject({
+    await expect(service.authenticateWithPassword(login(), REQ)).rejects.toMatchObject({
+      message: INVALID_CREDENTIALS_MESSAGE,
+    });
+    await expect(service.authenticateWithPassword(login('ada@example.com', finalPassword), REQ)).resolves.toMatchObject({
       user: { id: victim.id },
       effectiveRoles: ['mentee'],
     });

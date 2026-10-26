@@ -42,6 +42,7 @@ describe('/register', () => {
     const tree = await renderPage();
     const [layout] = findByType(tree, AuthLayout);
     expect(layout!.props.title).toBe('Create your account');
+    expect(layout!.props.description).toContain('choose your final password');
     expect((layout!.props.footer as React.ReactElement<{ href: string }>).props.href).toBe('/');
     expect(findByType(tree, RegisterForm)[0]!.props).toEqual({
       returnTo: '',

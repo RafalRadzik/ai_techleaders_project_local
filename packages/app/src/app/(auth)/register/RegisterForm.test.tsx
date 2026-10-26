@@ -40,6 +40,7 @@ describe('RegisterForm', () => {
     const password = screen.getByLabelText<HTMLInputElement>(/Password/);
     expect(password.type).toBe('password');
     expect(password.autocomplete).toBe('new-password');
+    expect(screen.getByText(/you will choose your final sign-in password/)).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Sign in' }).getAttribute('href')).toBe(LINKS.signInHref);
   });
 
@@ -61,6 +62,7 @@ describe('RegisterForm', () => {
     const status = await screen.findByRole('status');
     expect(within(status).getByText('Check your inbox at ada@example.com')).toBeTruthy();
     expect(status.textContent).toContain('register again with the same address to get a new link');
+    expect(status.textContent).toContain('then set your password to confirm your address and sign in');
     expect(screen.queryByRole('group')).toBeNull();
     expect(screen.getByRole('link', { name: 'Back to sign in' }).getAttribute('href')).toBe(LINKS.signInHref);
 

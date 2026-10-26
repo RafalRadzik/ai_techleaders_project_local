@@ -1,22 +1,24 @@
 import { createHmac } from 'node:crypto';
 import { LockMode, User, type EntityManager } from '@devmentor/db';
 import type { AppEnv } from '../../config/env';
-import { BadRequestError } from '../../http/errors';
+import { BadRequestError, ValidationError } from '../../http/errors';
 import { safeReturnTo } from '../../http/return-to';
 import type { Clock } from '../../time/clock';
+import { verifyEmailSchema } from '../../validators/auth/verify-email.schema';
 import type { Mailer } from '../notifications/mailer.port';
 import { isOperatorEligible, liveRoles, type Role } from './roles';
 import type { SessionService } from './session.service';
 import { signingKeys } from './signing-keys';
 import type { TokenService } from './token.service';
 import type { UserService } from './user.service';
+import type { PasswordService } from './password.service';
 
 export const EMAIL_VERIFY_PURPOSE = 'email-verify';
 
 /** A verification link works for 24 hours; registering again sends a fresh one. */
 export const EMAIL_VERIFY_TTL_SECONDS = 24 * 60 * 60;
 
-/** The browser-navigated route that consumes the link (`?token=`). */
+/** Existing emailed links open the password-completion screen through this route. */
 export const EMAIL_VERIFY_PATH = '/api/auth/verify-email';
 
 /**
@@ -83,6 +85,7 @@ interface EmailVerificationDeps {
   tokenService: Pick<TokenService, 'signPurposeToken' | 'verifyPurposeToken'>;
   sessionService: Pick<SessionService, 'issue'>;
   userService: Pick<UserService, 'reconcileOperator'>;
+  passwordService: Pick<PasswordService, 'hash'>;
   mailer: Mailer;
   clock: Clock;
   env: Pick<AppEnv, 'APP_URL' | 'OPERATOR_EMAILS' | 'SESSION_SECRET' | 'SESSION_SECRET_PREVIOUS'>;
@@ -96,12 +99,12 @@ function mailText(link: string): string {
   return [
     'A DevMentor account was just created with this email address.',
     '',
-    'Open this link to confirm the address and sign in:',
+    'Open this link to choose your password and confirm your email address:',
     link,
     '',
     'The link works for 24 hours. Registering again sends a new link and the old one stops working.',
     '',
-    'If you did not sign up for DevMentor, do not open the link. Ignore this email:',
+    'If you did not sign up for DevMentor, ignore this email. Opening the link alone does not activate the account:',
     'the account stays unconfirmed and nobody can sign in to it.',
   ].join('\n');
 }
@@ -114,28 +117,27 @@ function mailText(link: string): string {
  * travels in a URL through a mail relay. The pending password is already stored on the row,
  * and `emailVerifiedAt` is what gates sign-in. The fingerprint (`credentialFingerprint`)
  * binds the link to the hash the row held when it was sent: a later registration for the
- * same unverified address overwrites the hash, so only the newest link verifies. That
- * narrows, but does not close, the pre-account-hijack risk (see `.ai/lessons.md`).
- *
- * A verification link is bearer-authenticated by construction (B5): whoever holds it within
- * its 24 hours is treated as the inbox owner. Verifying an already-verified row is
- * idempotent and still signs the holder in, so a mail scanner that prefetched the link does
- * not break the user's own click (edge case 16).
+ * same unverified address overwrites the hash, so only the newest link verifies.
+ * Completion requires the inbox owner to replace the claim credential on a CSRF-protected POST.
+ * Opening a link never consumes it. Replacing the hash invalidates the link, and an
+ * explicit verified-row guard also prevents replay even if a fingerprint still matches.
  */
 export class EmailVerificationService {
   private readonly em: EntityManager;
   private readonly tokenService: EmailVerificationDeps['tokenService'];
   private readonly sessionService: EmailVerificationDeps['sessionService'];
   private readonly userService: EmailVerificationDeps['userService'];
+  private readonly passwordService: EmailVerificationDeps['passwordService'];
   private readonly mailer: Mailer;
   private readonly clock: Clock;
   private readonly env: EmailVerificationDeps['env'];
 
-  constructor({ em, tokenService, sessionService, userService, mailer, clock, env }: EmailVerificationDeps) {
+  constructor({ em, tokenService, sessionService, userService, passwordService, mailer, clock, env }: EmailVerificationDeps) {
     this.em = em;
     this.tokenService = tokenService;
     this.sessionService = sessionService;
     this.userService = userService;
+    this.passwordService = passwordService;
     this.mailer = mailer;
     this.clock = clock;
     this.env = env;
@@ -166,8 +168,8 @@ export class EmailVerificationService {
   }
 
   /**
-   * Consume a verification link: set `emailVerifiedAt` if unset (already verified is a
-   * success, not an error), reconcile the stored `operator` member, and issue a session.
+   * Consume a verification link and atomically replace the claim password, mark the email
+   * verified and revoke older sessions. Already verified rows always reject the link.
    * Throws `BadRequestError` for an invalid, expired or wrong-purpose token, for a token
    * naming no user, and for a link superseded by a later registration (its fingerprint no
    * longer matches the row's `passwordHash`).
@@ -175,7 +177,9 @@ export class EmailVerificationService {
    * The fingerprint is compared under the row lock that registration also takes, so a
    * re-registration cannot overwrite the hash between the comparison and the write.
    */
-  async verify(token: string): Promise<EmailVerification> {
+  async verify(token: string, password: string): Promise<EmailVerification> {
+    const input = verifyEmailSchema.safeParse({ token, password });
+    if (!input.success) throw new ValidationError('Check your password and confirmation link.');
     const { subject } = await this.tokenService.verifyPurposeToken(token, EMAIL_VERIFY_PURPOSE);
     const first = subject.indexOf(SUBJECT_SEPARATOR);
     const second = subject.indexOf(SUBJECT_SEPARATOR, first + 1);
@@ -190,8 +194,12 @@ export class EmailVerificationService {
         { id: userId },
         { lockMode: LockMode.PESSIMISTIC_WRITE },
       );
-      if (!user || !this.fingerprintMatches(user.passwordHash, fingerprint)) throw invalidLink();
-      if (user.emailVerifiedAt == null) user.emailVerifiedAt = this.clock.now();
+      if (!user || user.emailVerifiedAt != null || !this.fingerprintMatches(user.passwordHash, fingerprint)) {
+        throw invalidLink();
+      }
+      user.passwordHash = await this.passwordService.hash(password);
+      user.emailVerifiedAt = this.clock.now();
+      user.sessionVersion += 1;
       return user;
     });
 

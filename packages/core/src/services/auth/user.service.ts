@@ -18,6 +18,7 @@ import {
   guardCredentialAttempt,
   registrationLimits,
   signInLimits,
+  verificationResendLimits,
   type RateLimitKeyDeps,
   type RateLimiter,
 } from '../../http/rate-limit';
@@ -134,7 +135,7 @@ export class PasswordSignInRefusedError extends ForbiddenError {
   constructor(reason: PasswordSignInRefusedReason) {
     super(
       reason === 'email_unverified'
-        ? 'Confirm your email address first. Open the link in the email we sent you, then sign in.'
+        ? 'Confirm your email address first. Open the link in the email we sent you and set your password.'
         : 'This account has no active role. Ask an operator for access.',
     );
     this.reason = reason;
@@ -422,8 +423,9 @@ export class UserService {
    * Then mail a verification link bound to the new hash, so every earlier link for the row
    * stops working. No session is issued: `emailVerifiedAt` gates sign-in.
    *
-   * `req` is the route's request, used only to derive B8's per-IP registration check
-   * (`registrationLimits`). The service, not the route, builds the checks and runs the hash
+   * `req` is the route's request, used only to derive B8's trusted per-IP registration
+   * check, alongside the per-email verification-mail check even without a trusted IP.
+   * The service, not the route, builds the checks and runs the hash
    * inside `guardCredentialAttempt` — gate slot first, limits second, hash third — so no
    * caller can skip the limit or reorder it: a saturated gate answers 503 without counting
    * and a limited attempt never hashes. The slot covers
@@ -440,7 +442,10 @@ export class UserService {
     const { passwordService, rateLimiter, emailVerificationService } = this.credentials();
     const passwordHash = await guardCredentialAttempt(
       { passwordService, rateLimiter },
-      registrationLimits(req, this.limitKeyDeps()),
+      [
+        ...registrationLimits(req, this.limitKeyDeps()),
+        ...verificationResendLimits(input.email),
+      ],
       (slot) => slot.hash(input.password),
     );
 

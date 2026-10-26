@@ -1,15 +1,22 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  EventBus,
   LONGEST_RATE_LIMIT_WINDOW_MS,
+  PasswordService,
   RateLimiter,
   rateLimitKey,
   TooManyRequestsError,
+  UserService,
+  type AppEnv,
+  type Logger,
+  type PasswordHashingSlot,
   type RateLimitPolicy,
+  type VerificationRecipient,
 } from '@devmentor/core';
-import { entities, MikroORM } from '@devmentor/db';
+import { entities, MikroORM, User } from '@devmentor/db';
 import { integrationChildEnvironment } from './environment';
 
 const execFileAsync = promisify(execFile);
@@ -143,4 +150,83 @@ describe('TC-RATE-LIMIT-001 PostgreSQL-backed fixed-window counters', () => {
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(POLICY.limit);
     expect((await rows())[0]!.count).toBe(8);
   });
+
+  it.each([0, 1])(
+    'registration shares the three-mail email limit across request scopes and IPs with %i trusted hops',
+    async (trustedProxyHops) => {
+      const email = `register-limit-${trustedProxyHops}@devmentor.test`;
+      const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as Logger;
+      const eventBus = new EventBus({ logger });
+      const sent = vi.fn<(recipient: VerificationRecipient) => Promise<void>>(async () => undefined);
+      const passwords = new PasswordService({
+        env: { PASSWORD_HASH_CONCURRENCY: 1, PASSWORD_HASH_WAIT_MS: 5000 } as AppEnv,
+      });
+      const hashes: string[] = [];
+      const passwordService = {
+        withSlot<T>(fn: (slot: PasswordHashingSlot) => Promise<T>): Promise<T> {
+          return passwords.withSlot((slot) => fn({
+            ...slot,
+            hash: async (plain) => {
+              hashes.push(plain);
+              return slot.hash(plain);
+            },
+          }));
+        },
+      };
+      const register = (attempt: number, address = email) => {
+        const em = orm!.em.fork();
+        const requestClock = { now: () => clock.now };
+        const service = new UserService({
+          em,
+          logger,
+          eventBus,
+          clock: requestClock,
+          env: { OPERATOR_EMAILS: [], TRUSTED_PROXY_HOPS: trustedProxyHops },
+          session: Promise.resolve(null),
+          passwordService,
+          rateLimiter: new RateLimiter({ em, clock: requestClock }),
+          emailVerificationService: { send: sent },
+        });
+        return service.registerWithPassword(
+          { email: address, displayName: `Attempt ${attempt}`, password: `password attempt ${attempt}` },
+          new Request('https://devmentor.test/api/auth/register', {
+            headers: { 'x-forwarded-for': `203.0.113.${attempt + 1}` },
+          }),
+        );
+      };
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await expect(register(attempt)).resolves.toEqual({ email });
+      }
+      const before = await orm!.em.fork().findOneOrFail(User, { email });
+      expect(before.emailVerifiedAt).toBeNull();
+      expect(sent).toHaveBeenCalledTimes(3);
+      expect(hashes).toHaveLength(3);
+
+      await expect(register(3)).rejects.toMatchObject({
+        status: 429,
+        code: 'rate_limited',
+        retryAfterSeconds: 3600,
+      });
+
+      expect(sent).toHaveBeenCalledTimes(3);
+      expect(hashes).toHaveLength(3);
+      const after = await orm!.em.fork().findOneOrFail(User, { email });
+      expect(after.passwordHash).toBe(before.passwordHash);
+      expect(after.displayName).toBe('Attempt 2');
+      const counters = await rows();
+      expect(counters).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          key: rateLimitKey('verification-resend', 'email', email),
+          count: 4,
+        }),
+      ]));
+      expect(counters).toHaveLength(trustedProxyHops === 0 ? 1 : 5);
+      expect(counters.every(({ key }) => !key.includes(email))).toBe(true);
+      // No global fallback: a different email can still register after this one is limited.
+      const other = `other-${email}`;
+      await expect(register(3, other)).resolves.toEqual({ email: other });
+      expect(sent).toHaveBeenCalledTimes(4);
+    },
+  );
 });

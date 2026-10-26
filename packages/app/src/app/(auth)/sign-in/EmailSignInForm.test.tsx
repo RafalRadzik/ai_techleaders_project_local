@@ -73,7 +73,7 @@ describe('EmailSignInForm', () => {
   });
 
   it('keeps the server reason for an unverified email', async () => {
-    const message = 'Confirm your email address first. Open the link in the email we sent you, then sign in.';
+    const message = 'Confirm your email address first. Open the link in the email we sent you and set your password.';
     respond({ ok: false, error: { code: 'forbidden', message } }, 403);
     render(<EmailSignInForm returnTo="" />);
     await signIn();

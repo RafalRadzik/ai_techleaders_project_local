@@ -15,9 +15,10 @@ export function safeReturnTo(value: string | null | undefined, fallback: string)
   }
   if (UNSAFE_CHARACTERS.test(value)) return fallback;
 
-  // The checks above guarantee a same-origin path; parsing resolves `.`/`..` segments
-  // so `/./api/x` cannot slip past the prefix test.
+  // Dot-segment normalization can expose a leading `//` (for example `/..//host`),
+  // so validate the path we return as well as the original input.
   const url = new URL(value, PROBE_ORIGIN);
+  if (url.pathname.startsWith('//')) return fallback;
 
   const path = url.pathname.toLowerCase();
   const isNonPage = NON_PAGE_PREFIXES.some(

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { decodeJwt } from 'jose';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseAppEnv } from '../../config/env';
-import { BadRequestError, ServiceUnavailableError } from '../../http/errors';
+import { BadRequestError, ServiceUnavailableError, ValidationError } from '../../http/errors';
 import type { Clock } from '../../time/clock';
 import type { Mailer, MailMessage } from '../notifications/mailer.port';
 import {
@@ -24,6 +24,8 @@ const SECRET = 's'.repeat(32);
 const KEY = new TextEncoder().encode(SECRET);
 const USER_ID = '0b8f6a52-4a0e-4f8e-9a51-6f0d2c7e1a11';
 const FOUNDER = 'founder@devmentor.dev';
+const FINAL_PASSWORD = 'inbox owner chosen password';
+const FINAL_HASH = 'final-password-hash';
 
 interface Row {
   id: string;
@@ -75,11 +77,14 @@ function setup(
   };
   const tokenService = new TokenService({ env, clock });
   const sessionService = new SessionService({ env, clock });
+  const passwordService = { hash: vi.fn(async () => FINAL_HASH) };
+  const issue = vi.spyOn(sessionService, 'issue');
   const service = new EmailVerificationService({
     em: em as unknown as EntityManager,
     tokenService,
     sessionService,
     userService,
+    passwordService,
     mailer,
     clock,
     env,
@@ -91,6 +96,8 @@ function setup(
     userService,
     tokenService,
     sessionService,
+    passwordService,
+    issue,
     advance: (ms: number) => {
       now = new Date(now.getTime() + ms);
     },
@@ -130,7 +137,8 @@ describe('EmailVerificationService.send', () => {
     expect(message!.text).toContain('https://devmentor.example/api/auth/verify-email?token=');
     expect(message!.text).toContain('24 hours');
     expect(message!.text).not.toMatch(/[·•]/);
-    expect(message!.text).toContain('If you did not sign up for DevMentor, do not open the link.');
+    expect(message!.text).toContain('Opening the link alone does not activate the account');
+    expect(message!.text).toContain('choose your password');
 
     const token = tokenFrom(message);
     const seconds = Math.floor(START.getTime() / 1000);
@@ -183,12 +191,15 @@ describe('EmailVerificationService.verify', () => {
   });
 
   it('verifies the row, issues a session and returns the carried returnTo', async () => {
-    const { service, sent, em, sessionService } = setup(rows);
+    const { service, sent, em, sessionService, passwordService } = setup(rows);
     await service.send(rows[0]!, '/mentors/42');
 
-    const result = await service.verify(tokenFrom(sent[0]));
+    const result = await service.verify(tokenFrom(sent[0]), FINAL_PASSWORD);
 
     expect(rows[0]!.emailVerifiedAt).toEqual(START);
+    expect(rows[0]!.passwordHash).toBe(FINAL_HASH);
+    expect(rows[0]!.sessionVersion).toBe(3);
+    expect(passwordService.hash).toHaveBeenCalledWith(FINAL_PASSWORD);
     expect(em.transactional).toHaveBeenCalledTimes(1);
     // Under the row lock registration also takes, so a claim cannot interleave.
     expect(em.findOne).toHaveBeenCalledWith(expect.anything(), { id: USER_ID }, {
@@ -197,38 +208,43 @@ describe('EmailVerificationService.verify', () => {
     expect(result).toMatchObject({ roles: ['mentee'], returnTo: '/mentors/42' });
     await expect(sessionService.verify(sessionToken(result.cookie))).resolves.toEqual({
       userId: USER_ID,
-      sessionVersion: 2,
+      sessionVersion: 3,
     });
   });
 
   it('returns an empty returnTo when the link carried none', async () => {
     const { service, sent } = setup(rows);
     await service.send(rows[0]!);
-    await expect(service.verify(tokenFrom(sent[0]))).resolves.toMatchObject({ returnTo: '' });
+    await expect(service.verify(tokenFrom(sent[0]), FINAL_PASSWORD)).resolves.toMatchObject({ returnTo: '' });
   });
 
-  it('is idempotent for an already-verified row: no change, still a session', async () => {
+  it('rejects a verified row even if its claim fingerprint still matches', async () => {
     rows[0]!.emailVerifiedAt = EARLIER;
-    const { service, sent } = setup(rows);
+    const { service, sent, passwordService, issue } = setup(rows);
     await service.send(rows[0]!);
     const token = tokenFrom(sent[0]);
 
-    const first = await service.verify(token);
-    const second = await service.verify(token);
+    await expect(service.verify(token, FINAL_PASSWORD)).rejects.toBeInstanceOf(BadRequestError);
 
     expect(rows[0]!.emailVerifiedAt).toBe(EARLIER);
-    expect(first.cookie).toEqual(expect.any(String));
-    expect(second).toMatchObject({ roles: ['mentee'], cookie: expect.any(String) });
+    expect(rows[0]!.passwordHash).toBe(HASH);
+    expect(rows[0]!.sessionVersion).toBe(2);
+    expect(passwordService.hash).not.toHaveBeenCalled();
+    expect(issue).not.toHaveBeenCalled();
   });
 
-  it('a second click after verifying keeps the first timestamp', async () => {
-    const { service, sent, advance } = setup(rows);
+  it('a consumed link cannot replace the final password or issue another session', async () => {
+    const { service, sent, advance, passwordService, issue } = setup(rows);
     await service.send(rows[0]!);
     const token = tokenFrom(sent[0]);
-    await service.verify(token);
+    await service.verify(token, FINAL_PASSWORD);
     advance(1000);
-    await expect(service.verify(token)).resolves.toMatchObject({ roles: ['mentee'] });
+    await expect(service.verify(token, 'another final password')).rejects.toBeInstanceOf(BadRequestError);
     expect(rows[0]!.emailVerifiedAt).toEqual(START);
+    expect(rows[0]!.passwordHash).toBe(FINAL_HASH);
+    expect(rows[0]!.sessionVersion).toBe(3);
+    expect(passwordService.hash).toHaveBeenCalledOnce();
+    expect(issue).toHaveBeenCalledOnce();
   });
 
   it('rejects a link superseded by a later registration and verifies with the new one', async () => {
@@ -238,9 +254,9 @@ describe('EmailVerificationService.verify', () => {
     rows[0]!.passwordHash = 'scrypt$N=131072,r=8,p=1$b3RoZXJzYWx0b3RoZXI=$b3RoZXJrZXk=';
     await service.send(rows[0]!);
 
-    await expect(service.verify(tokenFrom(sent[0]))).rejects.toBeInstanceOf(BadRequestError);
+    await expect(service.verify(tokenFrom(sent[0]), FINAL_PASSWORD)).rejects.toBeInstanceOf(BadRequestError);
     expect(rows[0]!.emailVerifiedAt).toBeNull();
-    await expect(service.verify(tokenFrom(sent[1]))).resolves.toMatchObject({ roles: ['mentee'] });
+    await expect(service.verify(tokenFrom(sent[1]), FINAL_PASSWORD)).resolves.toMatchObject({ roles: ['mentee'] });
     expect(rows[0]!.emailVerifiedAt).toEqual(START);
   });
 
@@ -249,14 +265,14 @@ describe('EmailVerificationService.verify', () => {
     const { service, sent } = setup(rows);
     await service.send(rows[0]!);
     rows[0]!.passwordHash = HASH;
-    await expect(service.verify(tokenFrom(sent[0]))).rejects.toBeInstanceOf(BadRequestError);
+    await expect(service.verify(tokenFrom(sent[0]), FINAL_PASSWORD)).rejects.toBeInstanceOf(BadRequestError);
   });
 
   it('verifies a row without a password through an empty fingerprint', async () => {
     rows[0] = unverified({ passwordHash: null });
     const { service, sent } = setup(rows);
     await service.send(rows[0]!);
-    await expect(service.verify(tokenFrom(sent[0]))).resolves.toMatchObject({ roles: ['mentee'] });
+    await expect(service.verify(tokenFrom(sent[0]), FINAL_PASSWORD)).resolves.toMatchObject({ roles: ['mentee'] });
   });
 
   it('still accepts a link sent before a SESSION_SECRET rotation', async () => {
@@ -264,7 +280,7 @@ describe('EmailVerificationService.verify', () => {
     await before.service.send(rows[0]!);
     // The token itself was signed with the old secret too, so only the fingerprint matters here.
     const after = setup(rows, { previousSecret: 'o'.repeat(32) });
-    await expect(after.service.verify(tokenFrom(before.sent[0]))).resolves.toMatchObject({
+    await expect(after.service.verify(tokenFrom(before.sent[0]), FINAL_PASSWORD)).resolves.toMatchObject({
       roles: ['mentee'],
     });
   });
@@ -276,7 +292,7 @@ describe('EmailVerificationService.verify', () => {
       subject: `${USER_ID}.${credentialFingerprint(HASH, new TextEncoder().encode('o'.repeat(32)))}.`,
       ttlSeconds: 600,
     });
-    await expect(service.verify(token)).rejects.toBeInstanceOf(BadRequestError);
+    await expect(service.verify(token, FINAL_PASSWORD)).rejects.toBeInstanceOf(BadRequestError);
     expect(rows[0]!.emailVerifiedAt).toBeNull();
   });
 
@@ -284,16 +300,16 @@ describe('EmailVerificationService.verify', () => {
     rows[0]!.email = FOUNDER;
     const { service, sent, userService } = setup(rows, { operatorEmails: [FOUNDER] });
     await service.send(rows[0]!);
-    const result = await service.verify(tokenFrom(sent[0]));
+    const result = await service.verify(tokenFrom(sent[0]), FINAL_PASSWORD);
     expect(userService.reconcileOperator).toHaveBeenCalledWith(USER_ID);
     expect(result.roles).toEqual(['mentee', 'operator']);
   });
 
   it('issues no session for an operator-only row no longer on the allowlist', async () => {
-    rows[0] = unverified({ roles: ['operator'], emailVerifiedAt: EARLIER });
+    rows[0] = unverified({ roles: ['operator'] });
     const { service, sent } = setup(rows);
     await service.send(rows[0]!, '/admin');
-    await expect(service.verify(tokenFrom(sent[0]))).resolves.toEqual({
+    await expect(service.verify(tokenFrom(sent[0]), FINAL_PASSWORD)).resolves.toEqual({
       roles: [],
       cookie: null,
       returnTo: '/admin',
@@ -304,7 +320,7 @@ describe('EmailVerificationService.verify', () => {
     const { service, sent, em, advance } = setup(rows);
     await service.send(rows[0]!);
     advance(EMAIL_VERIFY_TTL_SECONDS * 1000 + 1000);
-    await expect(service.verify(tokenFrom(sent[0]))).rejects.toBeInstanceOf(BadRequestError);
+    await expect(service.verify(tokenFrom(sent[0]), FINAL_PASSWORD)).rejects.toBeInstanceOf(BadRequestError);
     expect(em.findOne).not.toHaveBeenCalled();
     expect(rows[0]!.emailVerifiedAt).toBeNull();
   });
@@ -316,13 +332,13 @@ describe('EmailVerificationService.verify', () => {
       subject: `${USER_ID}..`,
       ttlSeconds: 600,
     });
-    await expect(service.verify(token)).rejects.toBeInstanceOf(BadRequestError);
+    await expect(service.verify(token, FINAL_PASSWORD)).rejects.toBeInstanceOf(BadRequestError);
     expect(em.findOne).not.toHaveBeenCalled();
   });
 
   it('rejects a malformed token', async () => {
     const { service } = setup(rows);
-    await expect(service.verify('not-a-token')).rejects.toBeInstanceOf(BadRequestError);
+    await expect(service.verify('not-a-token', FINAL_PASSWORD)).rejects.toBeInstanceOf(BadRequestError);
   });
 
   it.each([
@@ -336,7 +352,7 @@ describe('EmailVerificationService.verify', () => {
       subject,
       ttlSeconds: 600,
     });
-    await expect(service.verify(token)).rejects.toBeInstanceOf(BadRequestError);
+    await expect(service.verify(token, FINAL_PASSWORD)).rejects.toBeInstanceOf(BadRequestError);
     expect(em.findOne).not.toHaveBeenCalled();
   });
 
@@ -347,13 +363,34 @@ describe('EmailVerificationService.verify', () => {
       subject: `${USER_ID}.${credentialFingerprint(HASH, KEY)}.//evil.example`,
       ttlSeconds: 600,
     });
-    await expect(service.verify(token)).resolves.toMatchObject({ returnTo: '' });
+    await expect(service.verify(token, FINAL_PASSWORD)).resolves.toMatchObject({ returnTo: '' });
   });
 
   it('treats a link for a user that no longer exists as invalid', async () => {
     const { service, sent, userService } = setup([]);
     await service.send(unverified());
-    await expect(service.verify(tokenFrom(sent[0]))).rejects.toBeInstanceOf(BadRequestError);
+    await expect(service.verify(tokenFrom(sent[0]), FINAL_PASSWORD)).rejects.toBeInstanceOf(BadRequestError);
     expect(userService.reconcileOperator).not.toHaveBeenCalled();
+  });
+
+  it.each(['', 'short', 'x'.repeat(73), 'ł'.repeat(37)])(
+    'rejects an invalid final password before touching a token, hash or row (%s)',
+    async (password) => {
+      const { service, tokenService, em, passwordService } = setup(rows);
+      const verifyToken = vi.spyOn(tokenService, 'verifyPurposeToken');
+      await expect(service.verify('token', password)).rejects.toBeInstanceOf(ValidationError);
+      expect(verifyToken).not.toHaveBeenCalled();
+      expect(em.transactional).not.toHaveBeenCalled();
+      expect(passwordService.hash).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not verify or bump the version when password hashing fails', async () => {
+    const { service, sent, passwordService, issue } = setup(rows);
+    await service.send(rows[0]!);
+    passwordService.hash.mockRejectedValueOnce(new ServiceUnavailableError());
+    await expect(service.verify(tokenFrom(sent[0]), FINAL_PASSWORD)).rejects.toBeInstanceOf(ServiceUnavailableError);
+    expect(rows[0]!).toMatchObject({ emailVerifiedAt: null, sessionVersion: 2, passwordHash: HASH });
+    expect(issue).not.toHaveBeenCalled();
   });
 });

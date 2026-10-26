@@ -146,7 +146,14 @@ async function build(): Promise<AwilixContainer<Cradle>> {
 }
 
 export function getContainer(): Promise<AwilixContainer<Cradle>> {
-  rootContainer ??= build();
+  if (!rootContainer) {
+    const pending = build().catch((error: unknown) => {
+      // A failed database connection must not poison subsequent page retries.
+      if (rootContainer === pending) rootContainer = undefined;
+      throw error;
+    });
+    rootContainer = pending;
+  }
   return rootContainer;
 }
 

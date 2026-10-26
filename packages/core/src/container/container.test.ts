@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getOrm } from '@devmentor/db';
 import { requireSession } from '../http/auth';
 import { BadRequestError, ForbiddenError, UnauthorizedError } from '../http/errors';
 import {
@@ -70,6 +71,37 @@ const PRODUCTION: RawEnv = {
 };
 
 describe('getContainer', () => {
+  it('retries initialization after a database failure rather than caching its rejection', async () => {
+    const unavailable = new Error('database unavailable');
+    vi.mocked(getOrm).mockRejectedValueOnce(unavailable);
+    const failed = getContainer();
+    expect(getContainer()).toBe(failed);
+    await expect(failed).rejects.toBe(unavailable);
+
+    const recovered = getContainer();
+    expect(recovered).not.toBe(failed);
+    expect((await recovered).cradle.orm).toBe(orm);
+    expect(getContainer()).toBe(recovered);
+  });
+
+  it('does not discard a newer container when an obsolete initialization fails', async () => {
+    let rejectObsolete!: (error: Error) => void;
+    vi.mocked(getOrm).mockImplementationOnce(
+      () => new Promise((_resolve, reject) => {
+        rejectObsolete = reject;
+      }),
+    );
+    const obsolete = getContainer();
+    resetContainer();
+    const current = getContainer();
+    await expect(current).resolves.toBeDefined();
+
+    const unavailable = new Error('obsolete database failure');
+    rejectObsolete(unavailable);
+    await expect(obsolete).rejects.toBe(unavailable);
+    expect(getContainer()).toBe(current);
+  });
+
   it('builds once and caches the container in this module graph, not on globalThis', async () => {
     const first = getContainer();
     expect(getContainer()).toBe(first);
@@ -325,7 +357,7 @@ describe('withScope', () => {
         subject: 'u1..',
         ttlSeconds: 60,
       });
-      await expect(emailVerificationService.verify(token)).rejects.toBeInstanceOf(BadRequestError);
+      await expect(emailVerificationService.verify(token, 'inbox owner password')).rejects.toBeInstanceOf(BadRequestError);
       return emailVerificationService;
     });
     expect(findOne).toHaveBeenCalledWith(expect.anything(), { id: 'u1' }, expect.anything());
@@ -355,10 +387,13 @@ describe('withScope', () => {
     fork.mockReturnValueOnce({
       forked: true,
       findOne,
+      execute: vi.fn(async (sql: string) =>
+        sql.startsWith('delete') ? {} : [{ count: 1, window_start_ms: 0 }],
+      ),
       transactional: vi.fn(async () => Promise.reject(reached)),
     } as never);
-    // No trusted proxy hop, so registration has no limit check and never touches the table;
-    // the real gate and hash run, then the stubbed transaction stops the flow.
+    // The per-email mail limit runs even without a trusted proxy; then the real hash
+    // runs and the stubbed transaction stops the flow.
     await expect(
       withScope(({ userService }) =>
         userService.registerWithPassword(

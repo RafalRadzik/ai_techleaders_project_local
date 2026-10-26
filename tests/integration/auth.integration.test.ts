@@ -99,6 +99,30 @@ describe('TC-AUTH-001 GitHub sign-in through the mock identity adapter', () => {
     });
   });
 
+  describe('Post-sign-in return destinations', () => {
+    it('uses the role home when a direct login request normalizes to an external destination', async () => {
+      const baseUrl = inject('integrationBaseUrl');
+      for (const returnTo of ['/..//evil.example/path', '/%2e%2e//evil.example/path']) {
+        const response = await fetch(`${baseUrl}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-devmentor-request': '1' },
+          body: JSON.stringify({
+            email: 'mock-operator@devmentor.test',
+            password: 'devmentor-password',
+            returnTo,
+          }),
+        });
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+          ok: true,
+          data: { landingPath: '/admin' },
+        });
+        expect(response.headers.get('set-cookie')).toContain(`${SESSION_COOKIE_NAME}=`);
+      }
+    });
+  });
+
   it("lands the seeded mentor's login on the mentor home", async () => {
     await inBrowser('mentor', async (session, baseUrl) => {
       const { landingPath } = await signInAs(session, baseUrl, 'mock-mentor');

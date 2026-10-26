@@ -161,19 +161,32 @@ GitHub sign-in as unavailable. Email sign-in needs only `SESSION_SECRET`.
 
 `/register` creates an account with a display name, an email address and a password
 (at least 12 characters, at most 72 bytes). Registering signs nobody in: DevMentor
-emails a link to `/api/auth/verify-email`, which works for 24 hours, confirms the
-address and signs the user in on their role's home (or the page they came from).
+emails a link to `/api/auth/verify-email`, valid for 24 hours. The inbox owner chooses
+their final password on the completion screen, which confirms the address and signs
+them in on their role's home (or the page they came from).
+Opening the link alone changes nothing and signs nobody in. The final password
+replaces the one entered at registration; a consumed link cannot change it again.
 Registering again with an unconfirmed address sends a fresh link and the old one stops
 working; this is also how to get a new link after one expires. An address whose
 account signs in with GitHub is refused with a pointer to GitHub sign-in.
 
 `/sign-in` offers GitHub first and the email form below it. A wrong password and an
 unknown address get the same "Invalid credentials" message. An unconfirmed address is
-refused until its link is opened. Too many attempts answer `429` with a wait time:
+refused until password completion verifies the address. Too many attempts answer
+`429` with a wait time:
 sign-in allows 10 attempts per IP and 5 per email in 15 minutes, registration 5 per IP
-per hour. Per-IP limits apply only when `TRUSTED_PROXY_HOPS` lets the app read the
-client's address. All three routes are JSON or redirect only; the forms post through
-`apiCall`, which sends the CSRF header.
+per hour and 3 verification mails per email per hour, including the first mail.
+Per-email registration limits always apply, even across different IPs. Per-IP limits
+apply only when `TRUSTED_PROXY_HOPS` lets the app safely read the client's address.
+With its default of `0`, registration uses the email limit and hashing concurrency
+gate, not an untrusted forwarded address or a shared global cap. State-changing
+requests are JSON-only; the forms post through `apiCall`, which sends the CSRF header.
+
+**Verification security change (2026-10-26):** existing emailed links still open the
+completion screen, but GET no longer activates an account or issues a session.
+Completion requires a CSRF-protected POST with the link token and the inbox owner's
+chosen password. This deliberately replaces automatic activation; keeping the old
+behavior would let an unsolicited link activate someone else's chosen password.
 
 In development no mail provider is needed. With `MAILER_ADAPTER` and `MAIL_API_KEY`
 unset, the log mailer writes every message to the `npm run dev` terminal as one JSON

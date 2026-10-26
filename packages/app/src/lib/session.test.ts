@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   cookie: undefined as string | undefined,
   session: null as unknown,
   current: vi.fn<() => Promise<unknown>>(),
+  logError: vi.fn(),
 }));
 
 vi.mock('next/headers', () => ({
@@ -33,6 +34,7 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@devmentor/core', async (importOriginal) => ({
   ...(await importOriginal<object>()),
+  createLogger: () => ({ error: state.logError }),
   withSessionCookieScope: vi.fn(
     async (_cookie: string | null | undefined, fn: (cradle: Cradle) => unknown) =>
       fn({
@@ -67,6 +69,7 @@ beforeEach(() => {
   state.cookie = undefined;
   state.session = null;
   state.current.mockReset();
+  state.logError.mockReset();
 });
 
 describe('cookie name', () => {
@@ -102,9 +105,14 @@ describe('getPageSession', () => {
     await expect(getPageSession()).resolves.toBeNull();
   });
 
-  it('rethrows anything else, such as a corrupt empty role set', async () => {
-    signedInAs(new Error('users.roles is empty for user u1'));
-    await expect(getPageSession()).rejects.toThrow('users.roles is empty');
+  it('logs and preserves unexpected session failures instead of returning signed out', async () => {
+    const error = new Error('database unavailable');
+    signedInAs(error);
+    await expect(getPageSession()).rejects.toBe(error);
+    expect(state.logError).toHaveBeenCalledExactlyOnceWith(
+      { err: error },
+      'Page session lookup failed',
+    );
     expect(redirect).not.toHaveBeenCalled();
   });
 });
@@ -136,6 +144,17 @@ describe('requirePageSession', () => {
   it('returns the session without redirecting when signed in', async () => {
     signedInAs(mentee);
     await expect(requirePageSession('/home')).resolves.toBe(mentee);
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('logs and preserves database failures without redirecting to sign-in', async () => {
+    const error = new Error('database unavailable');
+    signedInAs(error);
+    await expect(requirePageSession('/admin')).rejects.toBe(error);
+    expect(state.logError).toHaveBeenCalledExactlyOnceWith(
+      { err: error },
+      'Page session lookup failed',
+    );
     expect(redirect).not.toHaveBeenCalled();
   });
 });
@@ -238,10 +257,15 @@ describe('requirePageUser', () => {
     );
   });
 
-  it('rethrows any other failure', async () => {
+  it('logs and preserves any other user lookup failure', async () => {
     signedInAs(mentor);
-    state.current.mockRejectedValue(new Error('database down'));
-    await expect(requirePageUser('mentor', '/mentor')).rejects.toThrow('database down');
+    const error = new Error('database down');
+    state.current.mockRejectedValue(error);
+    await expect(requirePageUser('mentor', '/mentor')).rejects.toBe(error);
+    expect(state.logError).toHaveBeenCalledExactlyOnceWith(
+      { err: error },
+      'Page user lookup failed',
+    );
     expect(redirect).not.toHaveBeenCalled();
   });
 });

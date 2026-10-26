@@ -25,7 +25,7 @@ const FIELDS: CrudField[] = [
     type: 'password',
     required: true,
     autoComplete: 'new-password',
-    description: 'Use at least 12 characters.',
+    description: 'Use at least 12 characters. After opening the email link, you will choose your final sign-in password.',
   },
 ];
 
@@ -81,7 +81,7 @@ function CheckInbox({
         <AlertTitle>Check your inbox at {email}</AlertTitle>
         <AlertDescription>
           <p>
-            Open the link in the email we sent to confirm your address and sign in. The link
+            Open the link in the email we sent, then set your password to confirm your address and sign in. The link
             works for 24 hours.
           </p>
           <p>
@@ -103,7 +103,7 @@ function CheckInbox({
 /**
  * Everything below the `/register` heading: GitHub first, then the email form. A
  * successful registration replaces both with the check-your-inbox state; it sets no
- * cookie, because the emailed link is what signs the user in.
+ * cookie, because password completion after opening the emailed link signs the user in.
  */
 export function RegisterForm({ returnTo, githubHref, signInHref }: RegisterLinks & { returnTo: string }) {
   const [sentTo, setSentTo] = useState<string | null>(null);

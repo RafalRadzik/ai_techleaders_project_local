@@ -68,11 +68,13 @@ adds `network_error` and `invalid_response` in `apiCall.ts`.
   `devmentor_session` cookie; a live session also has its `session_version` bumped,
   which revokes every copy of the cookie.
 - `POST /api/auth/register` (added in E01 Slice 4, additive): enveloped, CSRF-checked,
-  public, rate-limited per IP. Body `registerSchema`
+  public, rate-limited per trusted IP and per email. Body `registerSchema`
   (`{ email, password, displayName, returnTo? }`, password 12 characters to 72 UTF-8
   bytes). Answers `{ ok: true, data: { email } }` and sets **no** cookie; the address
-  gets a 24-hour verification link. `409 conflict` for an address with a verified
-  account (its message points to GitHub when that account signs in there), `422` with
+  gets a 24-hour verification link. Initial and repeated verification mails share
+  the three-per-email/hour limit, even when no trusted IP is available.
+  `409 conflict` for an address with a verified account (its message points to GitHub
+  when that account signs in there), `422` with
   `fieldErrors`, `429 rate_limited`, `503` when the mail is not sent.
 - `POST /api/auth/login` (added in E01 Slice 4, additive): enveloped, CSRF-checked,
   public, rate-limited per IP and per email. Body `loginSchema`
@@ -85,13 +87,23 @@ adds `network_error` and `invalid_response` in `apiCall.ts`.
   `403 forbidden` for the right password on an unverified address or an account with
   no active role, `422`, `429 rate_limited`, `503` when the hashing gate is saturated.
 - `GET /api/auth/verify-email?token=` (added in E01 Slice 4, additive):
-  browser-navigated, not enveloped; every outcome is a 302. A valid link sets the
-  `devmentor_session` cookie and redirects to the link's `returnTo` (re-checked by
-  `safeReturnTo`) or the role home; already verified is a success. A missing, invalid,
-  expired or superseded token redirects to `/sign-in?error=verification`, an account
-  with no active role to `/sign-in?error=no_active_role`, anything else to
-  `/sign-in?error=unavailable`. The link format (`APP_URL` + this path + `?token=`) is
-  part of the contract: links already in inboxes must keep working for their 24 hours.
+  browser-navigated, not enveloped; every outcome is a 302. As of the user-approved
+  security correction of 2026-10-26, it opens `/verify-email` for password completion
+  and never verifies an address, changes a password, or sets a session cookie.
+  The link format (`APP_URL` + this path + `?token=`) and existing token format remain
+  supported for outstanding links. Invalid/expired/superseded/consumed links cannot
+  complete verification.
+- `POST /api/auth/verify-email` (added in the 2026-10-26 correction): enveloped,
+  JSON-only and CSRF-checked. The inbox owner supplies the link token and a chosen
+  password meeting registration's rules. Completion atomically replaces the
+  registration credential, verifies the address, and bumps `session_version`,
+  then issues a session and returns the safe `landingPath`. A consumed link cannot
+  reset the password or sign in again.
+
+  **Intentional breaking security correction:** GET previously verified and signed
+  in, including on a replay. That behavior is removed without an insecure bridge;
+  existing links instead lead to the new password-completion screen. See
+  `.ai/specs/2026-10-26-accounts-review-remediation.md` and `README.md`.
 - `makeCrudRoute` behavior asserted by `packages/core/src/http/makeCrudRoute.test.ts`:
   the default id parameter `id`, and the messages "This operation is not supported",
   "Missing resource id", and "Request body must be valid JSON".
@@ -147,6 +159,10 @@ API between packages. `npm run typecheck` is the consumer check.
   with `CookieAttributes`; `fetchJson` (the outbound-call wrapper with a timeout,
   `DEFAULT_OUTBOUND_TIMEOUT_MS`); `safeReturnTo`; and on `UserService`,
   `AccountNotLinkedError`, `LastRoleError`, `RoleChange`, `AssignableRole`.
+  `EmailVerificationService.verify(token, password)` requires the inbox owner's final
+  password as of the 2026-10-26 security correction; the old token-only activation
+  call is not retained. Its in-repo route and test consumers migrate together.
+  The additive `verifyEmailSchema` is available through the validators subpath.
   `requireSession(req, cradle)` replaced the
   stubbed `requireSession(req)`, `Session.roles` replaced `Session.role`, `student`
   became `mentee`, and the unverified `readSession` was removed — the only way to

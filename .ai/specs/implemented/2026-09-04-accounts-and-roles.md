@@ -5,7 +5,7 @@ Revised: 2026-09-06 — design review; see "What the 2026-09-06 revision changed
 Revised: 2026-09-08 — aligned with the primitives spec's 2026-09-08 grilling review; see "What the
 2026-09-08 revision changed" at the end
 Status: active
-Tracker: epic #7 — stories #12 (E01-S01), #13 (E01-S02), #14 (E01-S03)
+Tracker: epic #7 — stories #20 (E01-S01), #21 (E01-S02), #22 (E01-S03)
 Design authority: `.ai/specs/product-brief.md` (D07, D19, R06, R07, R18)
 Primitives: `.ai/specs/2026-09-04-platform-primitives.md` — the design authority for every
 mechanism this spec *uses*; referenced rather than restated. Where this revision changes a
